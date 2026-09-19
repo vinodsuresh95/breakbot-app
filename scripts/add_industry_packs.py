@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-LIB_PATH = Path(__file__).resolve().parents[1] / "public" / "prompt_library.json"
+LIB_PATH = Path(__file__).resolve().parents[1] / "backend" / "data" / "prompt_library.json"
 
 INDUSTRY_PACKS = [
     {

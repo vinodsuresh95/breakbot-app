@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
 import Website from './pages/Website.jsx'
 import MarketingOS from './pages/MarketingOS.jsx'
+import DashboardGate from './components/DashboardGate.jsx'
+import { getDashboardKey } from './lib/api.js'
 
-// Dashboard is at secret URL only — not linked publicly
-const DASHBOARD_SECRET = 'bb-command-2026'
+const DASHBOARD_SECRET = import.meta.env.VITE_DASHBOARD_PATH || 'bb-command-2026'
 
 export default function App() {
   const [page, setPage] = useState('website')
+  const [unlocked, setUnlocked] = useState(() => Boolean(getDashboardKey()))
 
   useEffect(() => {
     const path = window.location.pathname.replace(/^\//, '')
@@ -20,6 +22,9 @@ export default function App() {
     else setPage('website')
   }
 
-  if (page === 'dashboard') return <MarketingOS />
+  if (page === 'dashboard') {
+    if (!unlocked) return <DashboardGate />
+    return <MarketingOS onLock={() => setUnlocked(false)} />
+  }
   return <Website />
 }

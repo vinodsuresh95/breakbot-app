@@ -37,23 +37,24 @@ export const TYPICAL_AUDIT = (packId) => {
 // Back-compat alias used on website
 export const TOTAL_PROBES = TOTAL_LIBRARY
 
-/** Load full industry pack prompts from JSON at runtime */
+/** Load industry pack via authenticated API (dashboard only). */
 export async function loadIndustryPack(packId) {
-  const res = await fetch("/prompt_library.json")
-  const lib = await res.json()
+  const { fetchProbeLibrary } = await import('../lib/api.js')
+  const lib = await fetchProbeLibrary()
   const pack = lib.industry_packs?.find(p => p.id === packId)
   if (!pack) throw new Error(`Unknown industry pack: ${packId}`)
   return pack
 }
 
-/** Core OWASP probes + one industry's probes */
+/** Core OWASP probes + one industry's probes — requires dashboard auth. */
 export async function loadAllProbesForIndustry(packId) {
-  const lib = await fetch("/prompt_library.json").then(r => r.json())
+  const { fetchProbeLibrary } = await import('../lib/api.js')
+  const lib = await fetchProbeLibrary()
   const core = lib.categories.flatMap(c =>
-    c.prompts.map(p => ({ ...p, source: "core", category: c.name }))
+    c.prompts.map(p => ({ ...p, source: 'core', category: c.name }))
   )
   const industry = (lib.industry_packs?.find(p => p.id === packId)?.prompts || [])
-    .map(p => ({ ...p, source: "industry" }))
+    .map(p => ({ ...p, source: 'industry' }))
   return [...core, ...industry]
 }
 

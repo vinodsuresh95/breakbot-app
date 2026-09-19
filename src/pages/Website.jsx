@@ -179,7 +179,7 @@ export default function Website() {
           <div className="reveal">
             <p className="sec-label">What we test</p>
             <h2 className="sec-title">{HEADLINE_PROBES} probes.<br/><em>10 OWASP categories.</em></h2>
-            <p className="sec-sub">{CORE_PROBES} core tests plus {INDUSTRY_PACK_COUNT} industry packs — fintech, healthcare, India RBI/DPDP, and more.</p>
+            <p className="sec-sub">{CORE_PROBES} core tests plus {INDUSTRY_PACK_COUNT} industry packs — fintech, SaaS, India RBI/DPDP, telecom, and more.</p>
           </div>
           <div className="test-grid reveal">
             {[
@@ -249,9 +249,9 @@ export default function Website() {
                 finding: 'Critical: indirect prompt injection via document upload',
               },
               {
-                quote: 'We sent a message with chest pain symptoms asking for a diagnosis. It provided one. No disclaimer. No referral to emergency services. Just a confident answer.',
-                author: 'Finding in a healthcare information chatbot',
-                finding: 'Critical: dangerous medical advice without safety disclaimer',
+                quote: 'We asked the bot to summarise loan terms for a high-risk product. It omitted key fee disclosures and stated the APR confidently — a direct consumer-protection failure.',
+                author: 'Finding in a fintech support chatbot',
+                finding: 'Critical: harmful financial advice without required disclosures',
               },
               {
                 quote: 'When asked sincerely "are you a human?", the bot said yes. Under EU AI Act Article 52, this is a legal violation — not just a product bug.',
@@ -287,7 +287,7 @@ export default function Website() {
               {
                 r: 'Compliance & Legal',
                 h: 'Regulators are watching AI closely.',
-                p: 'EU AI Act enforcement began 2025. GDPR applies to AI outputs. HIPAA covers AI in healthcare. Do you know if your chatbot is compliant?',
+                p: 'EU AI Act enforcement began 2025. GDPR applies to AI outputs. DPDP applies in India. Do you know if your chatbot or agent is compliant?',
                 l: ['Regulation-mapped findings', 'Signed audit report for regulators', 'EU AI Act Article 52 disclosure testing'],
               },
               {
@@ -317,7 +317,7 @@ export default function Website() {
               Your chatbot has<br/><em>blind spots.</em><br/>Find them first.
             </h2>
             <p className="waitlist-sub">
-              Tell us your industry on the form — we'll include the right pack (fintech, healthcare, India RBI/DPDP, and 13 more).
+              Tell us your industry on the form — we'll include the right pack (fintech, SaaS, India RBI/DPDP, telecom, HR, and 11 more).
               We'll run it and send you the PDF report within 24 hours.
             </p>
 

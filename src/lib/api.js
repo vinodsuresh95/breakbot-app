@@ -1,9 +1,35 @@
 const API = import.meta.env.VITE_API_URL || '/api'
+const KEY_STORAGE = 'bb_dashboard_key'
+
+export function getDashboardKey() {
+  try {
+    return sessionStorage.getItem(KEY_STORAGE) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function setDashboardKey(key) {
+  sessionStorage.setItem(KEY_STORAGE, key)
+}
+
+export function clearDashboardKey() {
+  sessionStorage.removeItem(KEY_STORAGE)
+}
+
+function authHeaders(extra = {}) {
+  const key = getDashboardKey()
+  return {
+    'Content-Type': 'application/json',
+    ...(key ? { 'X-Dashboard-Key': key } : {}),
+    ...extra,
+  }
+}
 
 async function request(path, options = {}) {
   const res = await fetch(`${API}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,
+    headers: authHeaders(options.headers),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.detail || data.error || `Request failed (${res.status})`)
@@ -16,6 +42,27 @@ export async function checkHealth() {
     return data.status === 'ok'
   } catch {
     return false
+  }
+}
+
+export async function verifyDashboardKey(key) {
+  const res = await fetch(`${API}/auth/verify`, {
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Dashboard-Key': key,
+    },
+  })
+  if (!res.ok) return false
+  const data = await res.json().catch(() => ({}))
+  return data.ok === true
+}
+
+export async function dashboardAuthRequired() {
+  try {
+    const data = await request('/health')
+    return Boolean(data.dashboard_auth_required)
+  } catch {
+    return true
   }
 }
 
@@ -66,4 +113,8 @@ export async function runDailyAutomation(prospects) {
     method: 'POST',
     body: JSON.stringify({ prospects }),
   })
+}
+
+export async function fetchProbeLibrary() {
+  return request('/probes/library')
 }

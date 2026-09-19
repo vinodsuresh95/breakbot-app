@@ -8,14 +8,16 @@ from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from agents import AGENTS, BRIEF_SYSTEM
 from ai_client import call_claude, chat_claude, prospect_prompt, FAST_MODEL
+from auth import require_dashboard_key
 from email_service import send_email, smtp_configured
 from ml_scorer import blend_lead_score
+from probe_registry import get_industry_pack, library_stats, load_library
 from waitlist_service import save_waitlist
 
 load_dotenv()
@@ -123,24 +125,50 @@ app.add_middleware(
 )
 
 
+@app.get("/api/auth/verify")
+def auth_verify(_: None = Depends(require_dashboard_key)):
+    return {"ok": True}
+
+
 @app.get("/api/health")
 def health():
+    key_set = bool(os.getenv("DASHBOARD_API_KEY", "").strip())
     return {
         "status": "ok",
         "anthropic": bool(os.getenv("ANTHROPIC_API_KEY")),
         "smtp": smtp_configured(),
         "airtable": bool(os.getenv("AIRTABLE_TOKEN") and os.getenv("AIRTABLE_BASE_ID")),
+        "dashboard_auth_required": key_set,
     }
 
 
+@app.get("/api/probes/stats")
+def probes_stats():
+    """Public probe counts only — not the attack library itself."""
+    return library_stats()
+
+
+@app.get("/api/probes/library")
+def probes_library(_: None = Depends(require_dashboard_key)):
+    return load_library()
+
+
+@app.get("/api/probes/industry/{pack_id}")
+def probes_industry_pack(pack_id: str, _: None = Depends(require_dashboard_key)):
+    pack = get_industry_pack(pack_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail=f"Unknown industry pack: {pack_id}")
+    return pack
+
+
 @app.post("/api/agents/run")
-def agents_run(req: AgentRunRequest):
+def agents_run(req: AgentRunRequest, _: None = Depends(require_dashboard_key)):
     prospect = req.prospect.model_dump()
     return {"agent_id": req.agent_id, "result": _run_agent(req.agent_id, prospect)}
 
 
 @app.post("/api/agents/chat")
-def agents_chat(req: AgentChatRequest):
+def agents_chat(req: AgentChatRequest, _: None = Depends(require_dashboard_key)):
     agent = AGENTS.get(req.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Unknown agent: {req.agent_id}")
@@ -171,21 +199,20 @@ def agents_chat(req: AgentChatRequest):
 
 
 @app.post("/api/brief")
-def brief(req: BriefRequest):
+def brief(req: BriefRequest, _: None = Depends(require_dashboard_key)):
     text = call_claude(BRIEF_SYSTEM, req.context, json_mode=False, model=FAST_MODEL, max_tokens=700)
     return {"text": text}
 
 
 @app.post("/api/email/send")
-def email_send(req: EmailSendRequest):
+def email_send(req: EmailSendRequest, _: None = Depends(require_dashboard_key)):
     if not req.to or not req.subject or not req.body:
         raise HTTPException(status_code=400, detail="to, subject, and body are required")
     result = send_email(to=req.to, subject=req.subject, body=req.body)
     return result
 
 
-@app.post("/api/outreach/run")
-def outreach_run(req: OutreachRunRequest):
+def _execute_outreach(req: OutreachRunRequest) -> dict[str, Any]:
     """Full pipeline: SCOUT → JUDGE → NOVA → optional HERMES send."""
     prospect = req.prospect.model_dump()
     steps = req.steps or ["scout", "qualifier", "writer", "sender"]
@@ -209,7 +236,6 @@ def outreach_run(req: OutreachRunRequest):
             schedule = _run_agent("sender", prospect)
             results["sender"] = schedule
 
-    email_result = None
     if req.auto_send and prospect.get("email") and prospect.get("draftEmail"):
         draft = prospect["draftEmail"]
         email_result = send_email(
@@ -222,6 +248,11 @@ def outreach_run(req: OutreachRunRequest):
     return {"prospect": prospect, "results": results}
 
 
+@app.post("/api/outreach/run")
+def outreach_run(req: OutreachRunRequest, _: None = Depends(require_dashboard_key)):
+    return _execute_outreach(req)
+
+
 @app.post("/api/waitlist")
 async def waitlist(req: WaitlistRequest):
     result = await save_waitlist(req.model_dump())
@@ -229,8 +260,8 @@ async def waitlist(req: WaitlistRequest):
 
 
 @app.post("/api/automation/daily")
-def automation_daily(req: DailyAutomationRequest):
-    """Run daily outreach on prospects that need follow-up or are Tier A without email sent."""
+def automation_daily(req: DailyAutomationRequest, _: None = Depends(require_dashboard_key)):
+    """Draft follow-ups for hot leads — never auto-sends email without explicit approval."""
     actions = []
     for p in req.prospects:
         pdata = p.model_dump()
@@ -241,10 +272,12 @@ def automation_daily(req: DailyAutomationRequest):
         )
         if not should_run:
             continue
-        flow = outreach_run(OutreachRunRequest(prospect=p, auto_send=True, steps=["writer", "sender"]))
+        flow = _execute_outreach(
+            OutreachRunRequest(prospect=p, auto_send=False, steps=["writer", "sender"])
+        )
         actions.append({"company": pdata.get("company"), "result": flow})
 
-    return {"processed": len(actions), "actions": actions}
+    return {"processed": len(actions), "actions": actions, "auto_send": False}
 
 
 if __name__ == "__main__":

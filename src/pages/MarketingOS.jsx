@@ -58,10 +58,10 @@ Output ONLY valid JSON, no markdown.`
 Your job: Write cold outreach emails that feel human, personal, and specific — NOT like a template blast.
 
 BreakBot context:
-- Tests AI chatbots for 680+ security failures — 436 core OWASP probes plus 16 industry packs (fintech, healthcare, India RBI/DPDP, real estate, telecom, HR, and more)
-- Finds jailbreaks, data leaks, prompt injections, harmful advice, compliance violations
+- Tests AI agents and chatbots for 680+ security failures — 436 core OWASP probes plus 16 industry packs (fintech, SaaS, India RBI/DPDP, telecom, HR, legal, and more)
+- Finds jailbreaks, data leaks, prompt injections, tool/MCP abuse, compliance violations
 - First audit is completely free, report delivered in 24 hours
-- Vinod has 9 years ML/AI experience at Microsoft and CitiusTech (healthcare AI)
+- Vinod has 9 years ML/AI experience at Microsoft and enterprise AI platforms
 - Website: breakbot.netlify.app
 
 Email rules you follow:
@@ -90,7 +90,7 @@ CRITICAL RULES:
 - If no LinkedIn URL is provided, say "linkedin_url_missing" in your JSON and do not fabricate a profile.
 
 Vinod's LinkedIn context:
-- ~2,000 followers, CitiusTech Technical Lead, 9 yrs ML/AI, Microsoft background, DBA candidate
+- ~2,000 followers, 9 yrs ML/AI, Microsoft background, building BreakBot full-time
 - Personal brand: AI security expert and founder
 - Goal: warm relationships, not spray-and-pray
 
