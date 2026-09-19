@@ -134,3 +134,49 @@ export async function listAudits(limit = 20) {
 export async function getAudit(auditId) {
   return request(`/audit/${auditId}`)
 }
+
+export async function reviewFinding(auditId, payload) {
+  return request(`/audit/${auditId}/review`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function setAuditReportStatus(auditId, report_status) {
+  return request(`/audit/${auditId}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ report_status }),
+  })
+}
+
+export async function stripAuditEvidence(auditId) {
+  return request(`/audit/${auditId}/strip-evidence`, { method: 'POST' })
+}
+
+export async function deleteAudit(auditId) {
+  return request(`/audit/${auditId}`, { method: 'DELETE' })
+}
+
+export function auditExportUrl(auditId, clientSafe = true) {
+  const API = import.meta.env.VITE_API_URL || '/api'
+  const key = getDashboardKey()
+  const q = new URLSearchParams({ client_safe: clientSafe ? 'true' : 'false' })
+  if (key) q.set('key', key) // unused by server; open with header via window + fetch blob instead
+  return `${API}/audit/${auditId}/export?${q}`
+}
+
+export async function downloadAuditReport(auditId, clientSafe = true) {
+  const API = import.meta.env.VITE_API_URL || '/api'
+  const res = await fetch(`${API}/audit/${auditId}/export?client_safe=${clientSafe}`, {
+    headers: authHeaders(),
+  })
+  if (!res.ok) throw new Error('Export failed')
+  const html = await res.text()
+  const blob = new Blob([html], { type: 'text/html' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `breakbot-audit-${auditId.slice(0, 8)}.html`
+  a.click()
+  URL.revokeObjectURL(url)
+}

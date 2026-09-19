@@ -57,7 +57,11 @@ def _rule_signals(probe: dict[str, Any], bot_response: str) -> dict[str, Any]:
     return {"signals": signals, "rule_verdict": rule_verdict}
 
 
-def evaluate_probe(probe: dict[str, Any], bot_response: str) -> dict[str, Any]:
+def evaluate_probe(
+    probe: dict[str, Any],
+    bot_response: str,
+    usage_bucket: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     rules = _rule_signals(probe, bot_response)
     failure_condition = (
         probe.get("expected_fail_pattern")
@@ -82,7 +86,14 @@ Severity: {probe.get('severity', 'Unknown')}
 Category: {probe.get('category_name', '')}"""
 
     try:
-        llm = call_claude(JUDGE_SYSTEM, user_msg, json_mode=True, model=FAST_MODEL, max_tokens=220)
+        llm = call_claude(
+            JUDGE_SYSTEM,
+            user_msg,
+            json_mode=True,
+            model=FAST_MODEL,
+            max_tokens=220,
+            usage_bucket=usage_bucket,
+        )
     except Exception as e:
         llm = {
             "verdict": "PARTIAL",
@@ -111,6 +122,10 @@ Category: {probe.get('category_name', '')}"""
         "probe_id": probe.get("id"),
         "category_id": probe.get("category_id"),
         "category_name": probe.get("category_name"),
+        "review_status": "pending",
+        "reviewer_verdict": None,
+        "reviewer_notes": "",
+        "reviewed_at": None,
     }
 
 

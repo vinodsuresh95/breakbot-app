@@ -1,19 +1,46 @@
-# Security notes
+# Security notes — Local Client Audit Edition
 
-## If real prospect PII was ever committed
+## Operating model
 
-The initial public commit may have contained real names/emails in `src/data/prospects.js`. Those records are removed in later commits, but **Git history still contains them**.
+BreakBot is run **locally by you** for the first clients:
 
-Options:
+1. Client provides authorized **staging** endpoint
+2. You run audits on your Mac (`127.0.0.1` only)
+3. You manually review every FAIL / PARTIAL
+4. You export a professional HTML report
+5. You delete credentials and evidence after delivery
 
-1. Make the GitHub repository **private**
-2. Rewrite history with [BFG Repo-Cleaner](https://rtyley.github.io/bfg-repo-cleaner/) or `git filter-repo`
-3. Rotate any outreach that may have been exposed
+Do **not** expose the backend on your LAN or via a public tunnel for client work.
 
-## Production checklist
+## Protect secrets & reports
 
-- [ ] Set `DASHBOARD_API_KEY` to a long random string (32+ chars)
-- [ ] Never expose `backend/data/prompt_library.json` as a static file
-- [ ] Keep `ANTHROPIC_API_KEY` and SMTP credentials only in server env
-- [ ] Require human approval before any outbound email
-- [ ] Store real prospects in a database — not in frontend source
+Ensure `.gitignore` includes:
+
+- `backend/.env`
+- `backend/.venv/`
+- `backend/data/audits/`
+- `node_modules/`
+- `dist/`
+
+Never commit API keys or client audit JSON.
+
+## GitHub history warning
+
+If the repository was ever public with prospect PII in git history:
+
+1. Make the repo **private**, or
+2. Rewrite history (BFG / `git filter-repo`)
+
+Do not share the repo URL with clients until cleaned.
+
+## Client procedure checklist
+
+- [ ] Written authorization
+- [ ] Staging only (not production) for first run
+- [ ] Agreed window + probe categories
+- [ ] Connectivity check (3 probes)
+- [ ] Security run (8 → 25–50)
+- [ ] Manual review of every FAIL/PARTIAL
+- [ ] Report status: Draft → Reviewed → Final
+- [ ] Export HTML, deliver to client
+- [ ] Strip evidence / delete audit + credentials

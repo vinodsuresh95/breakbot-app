@@ -17,8 +17,14 @@ from ai_client import call_claude, chat_claude, prospect_prompt, FAST_MODEL
 from auth import require_dashboard_key
 from email_service import send_email, smtp_configured
 from ml_scorer import blend_lead_score
-from audit_engine import run_audit
-from audit_store import list_audits, load_audit
+from audit_engine import (
+    review_finding,
+    run_audit,
+    set_report_status,
+    strip_evidence,
+)
+from audit_store import delete_audit, list_audits, load_audit
+from report_export import build_html_report
 from probe_registry import get_industry_pack, library_stats, load_library
 from waitlist_service import save_waitlist
 
@@ -108,6 +114,20 @@ class AuditRunRequest(BaseModel):
     probe_ids: list[str] | None = None
     max_probes: int = 12
     authorization_confirmed: bool = False
+    authorization_notes: str = ""
+    testing_window: str = ""
+    limitations: str = ""
+
+
+class FindingReviewRequest(BaseModel):
+    probe_id: str
+    review_status: str  # pending | confirmed | false_positive | excluded
+    reviewer_verdict: str | None = None  # FAIL | PASS | PARTIAL
+    reviewer_notes: str = ""
+
+
+class ReportStatusRequest(BaseModel):
+    report_status: str  # Draft | Reviewed | Final
 
 
 class TargetPingRequest(BaseModel):
@@ -120,7 +140,10 @@ def _run_agent(agent_id: str, prospect: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Unknown agent: {agent_id}")
 
     prompt = prospect_prompt(prospect)
-    result = call_claude(agent["system"], prompt, json_mode=True)
+    try:
+        result = call_claude(agent["system"], prompt, json_mode=True)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
     if agent_id == "qualifier":
         result = blend_lead_score(prospect, result)
@@ -309,6 +332,11 @@ def audit_run(req: AuditRunRequest, _: None = Depends(require_dashboard_key)):
         category_ids=req.category_ids,
         probe_ids=req.probe_ids,
         max_probes=req.max_probes,
+        scope={
+            "authorization_notes": req.authorization_notes,
+            "testing_window": req.testing_window,
+            "limitations": req.limitations,
+        },
     )
     return report
 
@@ -326,8 +354,62 @@ def audit_get(audit_id: str, _: None = Depends(require_dashboard_key)):
     return report
 
 
+@app.post("/api/audit/{audit_id}/review")
+def audit_review_finding(audit_id: str, req: FindingReviewRequest, _: None = Depends(require_dashboard_key)):
+    try:
+        return review_finding(
+            audit_id,
+            req.probe_id,
+            review_status=req.review_status,
+            reviewer_verdict=req.reviewer_verdict,
+            reviewer_notes=req.reviewer_notes,
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Audit not found") from None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/audit/{audit_id}/status")
+def audit_set_status(audit_id: str, req: ReportStatusRequest, _: None = Depends(require_dashboard_key)):
+    try:
+        return set_report_status(audit_id, req.report_status)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Audit not found") from None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/audit/{audit_id}/export")
+def audit_export(audit_id: str, _: None = Depends(require_dashboard_key), client_safe: bool = True):
+    from fastapi.responses import HTMLResponse
+
+    report = load_audit(audit_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    html_doc = build_html_report(report, client_safe=client_safe)
+    return HTMLResponse(content=html_doc)
+
+
+@app.post("/api/audit/{audit_id}/strip-evidence")
+def audit_strip(audit_id: str, _: None = Depends(require_dashboard_key)):
+    try:
+        return strip_evidence(audit_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Audit not found") from None
+
+
+@app.delete("/api/audit/{audit_id}")
+def audit_delete(audit_id: str, _: None = Depends(require_dashboard_key)):
+    if not delete_audit(audit_id):
+        raise HTTPException(status_code=404, detail="Audit not found")
+    return {"deleted": True, "audit_id": audit_id}
+
+
 if __name__ == "__main__":
     import uvicorn
 
     port = int(os.getenv("PORT", "8001"))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    # Local client-audit edition: bind loopback only — never expose on LAN
+    host = os.getenv("HOST", "127.0.0.1")
+    uvicorn.run("main:app", host=host, port=port, reload=True)

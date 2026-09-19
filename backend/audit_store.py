@@ -1,4 +1,4 @@
-"""Persist audit reports as JSON files (v1 — replace with DB later)."""
+"""Persist local audit reports (file-based — no cloud DB)."""
 
 from __future__ import annotations
 
@@ -38,16 +38,28 @@ def list_audits(limit: int = 20) -> list[dict[str, Any]]:
     for path in files[:limit]:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
+            cost = data.get("cost") or {}
             out.append(
                 {
                     "audit_id": data.get("audit_id"),
                     "customer_name": data.get("customer_name"),
                     "status": data.get("status"),
-                    "security_score": data.get("summary", {}).get("score"),
+                    "report_status": data.get("report_status", "Draft"),
+                    "security_score": data.get("reviewed_summary", data.get("summary", {})).get("score"),
                     "probe_count": data.get("probe_count"),
                     "created_at": data.get("created_at"),
+                    "estimated_usd": cost.get("estimated_usd"),
+                    "duration_seconds": cost.get("duration_seconds"),
                 }
             )
         except json.JSONDecodeError:
             continue
     return out
+
+
+def delete_audit(audit_id: str) -> bool:
+    path = AUDIT_DIR / f"{audit_id}.json"
+    if not path.exists():
+        return False
+    path.unlink()
+    return True

@@ -72,7 +72,7 @@ def validate_target_url(url: str) -> None:
 
 
 class TargetClient:
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], usage_bucket: dict[str, Any] | None = None):
         self.mode = config.get("mode") or "http_json"
         self.url = (config.get("url") or "").strip()
         self.method = (config.get("method") or "POST").upper()
@@ -81,6 +81,7 @@ class TargetClient:
         self.response_field = config.get("response_field") or "response"
         self.auth_bearer = config.get("auth_bearer")
         self.timeout = min(60.0, max(1.0, float(config.get("timeout_seconds") or 45)))
+        self.usage_bucket = usage_bucket
         if self.mode == "http_json":
             if self.method != "POST":
                 raise ValueError("Only POST targets are supported")
@@ -102,7 +103,18 @@ class TargetClient:
             system=DEMOBOT_SYSTEM,
             messages=[{"role": "user", "content": message}],
         )
-        return (resp.content[0].text if resp.content else "") or ""
+        if self.usage_bucket is not None and getattr(resp, "usage", None):
+            from usage_tracker import add_usage
+
+            add_usage(
+                self.usage_bucket,
+                FAST_MODEL,
+                int(resp.usage.input_tokens or 0),
+                int(resp.usage.output_tokens or 0),
+            )
+        from ai_client import _extract_text
+
+        return _extract_text(resp) or ""
 
     def _http_json(self, message: str, session_id: str | None) -> str:
         if not self.url:

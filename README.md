@@ -1,81 +1,70 @@
-# BreakBot — AI agent red-teaming platform (MVP)
+# BreakBot — Local Client Audit Edition
 
-## Architecture
+Run BreakBot on your Mac for the first 2–3 authorized clients. Not customer-facing SaaS yet.
 
-| Layer | Stack | Purpose |
-|-------|-------|---------|
-| Frontend | React + Vite | Marketing site + Marketing OS dashboard |
-| Backend | FastAPI + Claude | 7 AI agents, lead scoring, email send, waitlist |
-| Probe library | `backend/data/prompt_library.json` | 680 probes — **server-side only** |
+## Operating model
 
-**Public:** `/` (marketing + waitlist)  
-**Dashboard:** `/bb-command-2026` — requires `DASHBOARD_API_KEY`
+```text
+Client staging endpoint (authorized)
+        ↓
+You run BreakBot locally (127.0.0.1)
+        ↓
+Manual review of FAIL / PARTIAL
+        ↓
+Export HTML report (Draft → Reviewed → Final)
+        ↓
+Delete evidence / credentials
+```
+
+**Do not build yet:** cloud multi-tenant SaaS, Postgres, billing, customer portal, CI/CD for clients.
 
 ## Run locally
 
-### 1. Python backend
+### 1. Backend (loopback only)
 
 ```bash
 cd backend
 python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # set ANTHROPIC_API_KEY + DASHBOARD_API_KEY
-python main.py         # http://127.0.0.1:8001
+cp .env.example .env   # ANTHROPIC_API_KEY (+ optional DASHBOARD_API_KEY)
+python main.py         # http://127.0.0.1:8001 — NOT 0.0.0.0
 ```
 
-### 2. React frontend
+### 2. Frontend
 
 ```bash
 npm install
-npm run dev            # http://localhost:3000 — proxies /api → backend
+npm run dev            # http://localhost:3000
 ```
 
-Open `/bb-command-2026` and enter the same `DASHBOARD_API_KEY` from `.env`.
+Open: **http://localhost:3000/bb-command-2026** → **Security Audit**
 
-## Security
+Demonstrate via screen share — do not tunnel your Mac publicly.
+
+## Client audit workflow
+
+1. Written authorization + staging URL (HTTPS preferred)
+2. 3-probe connectivity → 8-probe run → 25–50 if stable
+3. Manually **Confirm FAIL**, mark **False positive**, or **Exclude**
+4. Set report status **Reviewed** → **Final**
+5. **Export HTML report**
+6. **Delete evidence** / **Delete audit** + rotate client credentials
+
+## What is protected
 
 | Asset | Protection |
 |-------|------------|
-| Agent runs, email send, outreach | `X-Dashboard-Key` header required when `DASHBOARD_API_KEY` is set |
-| Probe library | Served only via `GET /api/probes/library` (authenticated) |
-| Waitlist | Public `POST /api/waitlist` only |
-| Prospect data | Demo records in repo — use dashboard/localStorage or a DB for real leads |
+| Backend bind | `127.0.0.1` by default |
+| Audits on disk | `backend/data/audits/` (gitignored) |
+| Secrets | `backend/.env` (gitignored) |
+| Probe library | Server-side only |
+| Dashboard APIs | `DASHBOARD_API_KEY` when set (fail-closed if `APP_ENV=production`) |
+| HTTP targets | HTTPS required unless `ALLOW_HTTP_TARGETS=true` |
+| Evidence | Secret redaction on persist |
 
-**Production:** set `APP_ENV=production` and a long random `DASHBOARD_API_KEY`.
-Protected routes fail closed when the key is missing. Never commit `backend/.env`.
+See `SECURITY.md` for the full checklist.
 
-## Environment variables
+## GitHub note
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `ANTHROPIC_API_KEY` | Yes | Powers all 7 agents |
-| `DASHBOARD_API_KEY` | Yes (prod) | Protects dashboard API |
-| `APP_ENV` | Yes (prod) | Set to `production` to enforce fail-closed auth |
-| `FRONTEND_ORIGIN` | Yes (prod) | Allowed Netlify frontend origin |
-| `ALLOW_HTTP_TARGETS` | No | Keep unset; HTTPS audit targets are required by default |
-| `SMTP_*` | For email send | Gmail app password works |
-| `AIRTABLE_*` | Optional | Waitlist → Airtable |
-
-## Security Engine v1
-
-Authenticated dashboard → **Security Audit** tab, or API:
-
-```bash
-curl -X POST http://127.0.0.1:8001/api/audit/run \
-  -H "Content-Type: application/json" \
-  -H "X-Dashboard-Key: YOUR_KEY" \
-  -d '{
-    "authorization_confirmed": true,
-    "customer_name": "Pilot",
-    "industry_pack": "FIN",
-    "max_probes": 8,
-    "target": { "mode": "demobot" }
-  }'
-```
-
-Flow: probe selection → target HTTP/demobot → rules + LLM judge → score + JSON report in `backend/data/audits/`.
-
-## Next milestone
-
-Async jobs, multi-turn sessions, PDF export, CI webhook (`POST /api/audit/run` from GitHub Actions).
+If the repo was public with prospect data in history: make it **private** or rewrite history before sharing with clients.
