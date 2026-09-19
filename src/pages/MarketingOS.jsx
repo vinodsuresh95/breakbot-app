@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as backend from "../lib/api.js";
 import { loadProspects, normalizeLinkedIn } from "../data/prospects.js";
+import SecurityAuditPanel from "../components/SecurityAuditPanel.jsx";
 
 // ── THEME ─────────────────────────────────────────────────────────────────────
 const C = {
@@ -665,6 +666,7 @@ Recent activity: ${prospects.flatMap(p=>(p.history||[]).slice(-1).map(h=>`${p.co
             {[
               { k:"brief",     icon:"☀️", label:"Daily Brief" },
               { k:"dashboard", icon:"📊", label:"Dashboard" },
+              { k:"security",  icon:"🛡️", label:"Security Audit" },
               { k:"pipeline",  icon:"🗂", label:"Pipeline" },
               { k:"prospects", icon:"👥", label:"Prospects" },
               { k:"agents",    icon:"🤖", label:"AI Agents" },
@@ -711,7 +713,7 @@ Recent activity: ${prospects.flatMap(p=>(p.history||[]).slice(-1).map(h=>`${p.co
           <div style={{ height:50, background:C.sur, borderBottom:`1px solid ${C.bdr}`, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 20px", flexShrink:0 }}>
             <div>
               <div style={{ fontFamily:"'IBM Plex Mono',monospace", fontWeight:700, fontSize:13, color:C.cream }}>
-                { view==="brief"?"☀️ Daily Brief": view==="dashboard"?"Marketing Command Center": view==="pipeline"?"Outreach Pipeline": view==="prospects"?"Prospect Database": view==="agents"?"AI Agent Roster": view==="agentchat"&&activeAgent ? `${AGENTS.find(a=>a.id===activeAgent)?.emoji} ${AGENTS.find(a=>a.id===activeAgent)?.name} — ${AGENTS.find(a=>a.id===activeAgent)?.role}` : view==="prospect-detail"?"Prospect Detail":"" }
+                { view==="brief"?"☀️ Daily Brief": view==="dashboard"?"Marketing Command Center": view==="security"?"Security Engine v1": view==="pipeline"?"Outreach Pipeline": view==="prospects"?"Prospect Database": view==="agents"?"AI Agent Roster": view==="agentchat"&&activeAgent ? `${AGENTS.find(a=>a.id===activeAgent)?.emoji} ${AGENTS.find(a=>a.id===activeAgent)?.name} — ${AGENTS.find(a=>a.id===activeAgent)?.role}` : view==="prospect-detail"?"Prospect Detail":"" }
               </div>
               <div style={{ fontSize:9, color:C.mut, fontFamily:"'IBM Plex Mono',monospace" }}>7 AI agents · Python backend · localStorage persistence</div>
             </div>
@@ -953,6 +955,10 @@ Recent activity: ${prospects.flatMap(p=>(p.history||[]).slice(-1).map(h=>`${p.co
             )}
 
             {/* ── DASHBOARD ── */}
+            {view==="security"&&(
+              <SecurityAuditPanel />
+            )}
+
             {view==="dashboard"&&(
               <div style={{animation:"fadeIn .3s ease"}}>
                 {/* Pipeline overview */}

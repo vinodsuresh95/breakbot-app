@@ -53,6 +53,25 @@ Open `/bb-command-2026` and enter the same `DASHBOARD_API_KEY` from `.env`.
 | `SMTP_*` | For email send | Gmail app password works |
 | `AIRTABLE_*` | Optional | Waitlist → Airtable |
 
+## Security Engine v1
+
+Authenticated dashboard → **Security Audit** tab, or API:
+
+```bash
+curl -X POST http://127.0.0.1:8001/api/audit/run \
+  -H "Content-Type: application/json" \
+  -H "X-Dashboard-Key: YOUR_KEY" \
+  -d '{
+    "authorization_confirmed": true,
+    "customer_name": "Pilot",
+    "industry_pack": "FIN",
+    "max_probes": 8,
+    "target": { "mode": "demobot" }
+  }'
+```
+
+Flow: probe selection → target HTTP/demobot → rules + LLM judge → score + JSON report in `backend/data/audits/`.
+
 ## Next milestone
 
-**Security Engine v1:** authorized endpoint → probe selection → multi-turn attacks → evaluation → evidence → report.
+Async jobs, multi-turn sessions, PDF export, CI webhook (`POST /api/audit/run` from GitHub Actions).

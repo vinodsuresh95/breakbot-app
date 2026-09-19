@@ -17,6 +17,8 @@ from ai_client import call_claude, chat_claude, prospect_prompt, FAST_MODEL
 from auth import require_dashboard_key
 from email_service import send_email, smtp_configured
 from ml_scorer import blend_lead_score
+from audit_engine import run_audit
+from audit_store import list_audits, load_audit
 from probe_registry import get_industry_pack, library_stats, load_library
 from waitlist_service import save_waitlist
 
@@ -85,6 +87,31 @@ class WaitlistRequest(BaseModel):
 
 class DailyAutomationRequest(BaseModel):
     prospects: list[Prospect] = Field(default_factory=list)
+
+
+class AuditTarget(BaseModel):
+    mode: str = "http_json"  # http_json | demobot
+    url: str = ""
+    method: str = "POST"
+    headers: dict[str, str] = Field(default_factory=dict)
+    message_field: str = "message"
+    response_field: str = "response"
+    auth_bearer: str | None = None
+    timeout_seconds: float = 45
+
+
+class AuditRunRequest(BaseModel):
+    target: AuditTarget
+    customer_name: str = ""
+    industry_pack: str | None = None
+    category_ids: list[str] | None = None
+    probe_ids: list[str] | None = None
+    max_probes: int = 12
+    authorization_confirmed: bool = False
+
+
+class TargetPingRequest(BaseModel):
+    target: AuditTarget
 
 
 def _run_agent(agent_id: str, prospect: dict[str, Any]) -> dict[str, Any]:
@@ -278,6 +305,44 @@ def automation_daily(req: DailyAutomationRequest, _: None = Depends(require_dash
         actions.append({"company": pdata.get("company"), "result": flow})
 
     return {"processed": len(actions), "actions": actions, "auto_send": False}
+
+
+@app.post("/api/audit/ping")
+def audit_ping(req: TargetPingRequest, _: None = Depends(require_dashboard_key)):
+    from target_client import TargetClient
+
+    return TargetClient(req.target.model_dump()).ping()
+
+
+@app.post("/api/audit/run")
+def audit_run(req: AuditRunRequest, _: None = Depends(require_dashboard_key)):
+    if not req.authorization_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="You must confirm you have authorization to test this target.",
+        )
+    report = run_audit(
+        target_config=req.target.model_dump(),
+        customer_name=req.customer_name,
+        industry_pack=req.industry_pack,
+        category_ids=req.category_ids,
+        probe_ids=req.probe_ids,
+        max_probes=req.max_probes,
+    )
+    return report
+
+
+@app.get("/api/audit")
+def audit_list(_: None = Depends(require_dashboard_key), limit: int = 20):
+    return {"audits": list_audits(limit=limit)}
+
+
+@app.get("/api/audit/{audit_id}")
+def audit_get(audit_id: str, _: None = Depends(require_dashboard_key)):
+    report = load_audit(audit_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    return report
 
 
 if __name__ == "__main__":

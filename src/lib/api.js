@@ -118,3 +118,19 @@ export async function runDailyAutomation(prospects) {
 export async function fetchProbeLibrary() {
   return request('/probes/library')
 }
+
+export async function pingAuditTarget(target) {
+  return request('/audit/ping', { method: 'POST', body: JSON.stringify({ target }) })
+}
+
+export async function runSecurityAudit(payload) {
+  return request('/audit/run', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export async function listAudits(limit = 20) {
+  return request(`/audit?limit=${limit}`)
+}
+
+export async function getAudit(auditId) {
+  return request(`/audit/${auditId}`)
+}
