@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA routing — dashboard at /bb-command-2026
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Note: AI backend runs separately (Railway/Render).
+# Set VITE_API_URL in Netlify build env to point to your Python API.

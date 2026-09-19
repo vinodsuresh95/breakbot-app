@@ -1,0 +1,254 @@
+"""BreakBot FastAPI backend — AI agents, ML scoring, email, automation."""
+
+from __future__ import annotations
+
+import os
+from contextlib import asynccontextmanager
+from typing import Any
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+from agents import AGENTS, BRIEF_SYSTEM
+from ai_client import call_claude, chat_claude, prospect_prompt, FAST_MODEL
+from email_service import send_email, smtp_configured
+from ml_scorer import blend_lead_score
+from waitlist_service import save_waitlist
+
+load_dotenv()
+
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+scheduler = BackgroundScheduler()
+
+
+class Prospect(BaseModel):
+    id: int | str | None = None
+    company: str = ""
+    country: str = ""
+    industry: str = ""
+    contact: str = ""
+    title: str = ""
+    email: str = ""
+    linkedin: str = ""
+    chatbot: str = ""
+    stage: str = "researched"
+    score: int = 0
+    tier: str = "C"
+    notes: str = ""
+    researchData: dict[str, Any] | None = None
+    draftEmail: dict[str, Any] | None = None
+
+
+class AgentRunRequest(BaseModel):
+    agent_id: str
+    prospect: Prospect
+
+
+class AgentChatRequest(BaseModel):
+    agent_id: str
+    messages: list[dict[str, str]]
+    prospect: Prospect | None = None
+
+
+class BriefRequest(BaseModel):
+    context: str
+
+
+class EmailSendRequest(BaseModel):
+    to: str
+    subject: str
+    body: str
+    prospect_id: int | str | None = None
+    company: str | None = None
+
+
+class OutreachRunRequest(BaseModel):
+    prospect: Prospect
+    auto_send: bool = False
+    steps: list[str] | None = None
+
+
+class WaitlistRequest(BaseModel):
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    chatbot: str = ""
+    industry: str = ""
+    message: str = ""
+    source: str = "website"
+
+
+class DailyAutomationRequest(BaseModel):
+    prospects: list[Prospect] = Field(default_factory=list)
+
+
+def _run_agent(agent_id: str, prospect: dict[str, Any]) -> dict[str, Any]:
+    agent = AGENTS.get(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Unknown agent: {agent_id}")
+
+    prompt = prospect_prompt(prospect)
+    result = call_claude(agent["system"], prompt, json_mode=True)
+
+    if agent_id == "qualifier":
+        result = blend_lead_score(prospect, result)
+
+    return result
+
+
+def _draft_email_if_needed(prospect: dict[str, Any]) -> dict[str, Any]:
+    if prospect.get("draftEmail") and prospect["draftEmail"].get("subject"):
+        return prospect["draftEmail"]
+    return call_claude(AGENTS["writer"]["system"], prospect_prompt(prospect), json_mode=True)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    scheduler.start()
+    yield
+    scheduler.shutdown(wait=False)
+
+
+app = FastAPI(title="BreakBot API", version="1.0.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FRONTEND_ORIGIN, "http://localhost:5173", "https://breakbot.netlify.app"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/api/health")
+def health():
+    return {
+        "status": "ok",
+        "anthropic": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "smtp": smtp_configured(),
+        "airtable": bool(os.getenv("AIRTABLE_TOKEN") and os.getenv("AIRTABLE_BASE_ID")),
+    }
+
+
+@app.post("/api/agents/run")
+def agents_run(req: AgentRunRequest):
+    prospect = req.prospect.model_dump()
+    return {"agent_id": req.agent_id, "result": _run_agent(req.agent_id, prospect)}
+
+
+@app.post("/api/agents/chat")
+def agents_chat(req: AgentChatRequest):
+    agent = AGENTS.get(req.agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Unknown agent: {req.agent_id}")
+
+    system = agent["system"]
+    if req.prospect:
+        system += f"\n\nCurrent prospect context:\n{prospect_prompt(req.prospect.model_dump())}"
+
+    # Detect send-email intent in last user message
+    last_user = next((m["content"] for m in reversed(req.messages) if m.get("role") == "user"), "")
+    send_intent = any(k in last_user.lower() for k in ("send email", "email them", "send outreach", "send now"))
+
+    reply = chat_claude(system, req.messages)
+
+    email_action = None
+    if send_intent and req.prospect:
+        p = req.prospect.model_dump()
+        draft = _draft_email_if_needed(p)
+        if p.get("email"):
+            email_action = send_email(
+                to=p["email"],
+                subject=draft.get("subject", "BreakBot — chatbot security audit"),
+                body=draft.get("body", ""),
+            )
+            email_action["draft"] = draft
+
+    return {"reply": reply, "email_action": email_action}
+
+
+@app.post("/api/brief")
+def brief(req: BriefRequest):
+    text = call_claude(BRIEF_SYSTEM, req.context, json_mode=False, model=FAST_MODEL, max_tokens=700)
+    return {"text": text}
+
+
+@app.post("/api/email/send")
+def email_send(req: EmailSendRequest):
+    if not req.to or not req.subject or not req.body:
+        raise HTTPException(status_code=400, detail="to, subject, and body are required")
+    result = send_email(to=req.to, subject=req.subject, body=req.body)
+    return result
+
+
+@app.post("/api/outreach/run")
+def outreach_run(req: OutreachRunRequest):
+    """Full pipeline: SCOUT → JUDGE → NOVA → optional HERMES send."""
+    prospect = req.prospect.model_dump()
+    steps = req.steps or ["scout", "qualifier", "writer", "sender"]
+    results: dict[str, Any] = {}
+
+    for step in steps:
+        if step == "scout":
+            research = _run_agent("scout", prospect)
+            prospect["researchData"] = research
+            results["scout"] = research
+        elif step == "qualifier":
+            score = _run_agent("qualifier", prospect)
+            prospect["score"] = score.get("total_score", prospect.get("score", 0))
+            prospect["tier"] = score.get("tier", prospect.get("tier", "C"))
+            results["qualifier"] = score
+        elif step == "writer":
+            draft = _run_agent("writer", prospect)
+            prospect["draftEmail"] = draft
+            results["writer"] = draft
+        elif step == "sender":
+            schedule = _run_agent("sender", prospect)
+            results["sender"] = schedule
+
+    email_result = None
+    if req.auto_send and prospect.get("email") and prospect.get("draftEmail"):
+        draft = prospect["draftEmail"]
+        email_result = send_email(
+            to=prospect["email"],
+            subject=draft.get("subject", "BreakBot security audit"),
+            body=draft.get("body", ""),
+        )
+        results["email"] = email_result
+
+    return {"prospect": prospect, "results": results}
+
+
+@app.post("/api/waitlist")
+async def waitlist(req: WaitlistRequest):
+    result = await save_waitlist(req.model_dump())
+    return {"success": True, **result}
+
+
+@app.post("/api/automation/daily")
+def automation_daily(req: DailyAutomationRequest):
+    """Run daily outreach on prospects that need follow-up or are Tier A without email sent."""
+    actions = []
+    for p in req.prospects:
+        pdata = p.model_dump()
+        should_run = (
+            pdata.get("tier") in ("A", "B")
+            and pdata.get("stage") in ("researched", "drafted")
+            and pdata.get("email")
+        )
+        if not should_run:
+            continue
+        flow = outreach_run(OutreachRunRequest(prospect=p, auto_send=True, steps=["writer", "sender"]))
+        actions.append({"company": pdata.get("company"), "result": flow})
+
+    return {"processed": len(actions), "actions": actions}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.getenv("PORT", "8001"))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
