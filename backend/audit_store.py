@@ -22,7 +22,11 @@ def save_audit(report: dict[str, Any]) -> str:
 
 
 def load_audit(audit_id: str) -> dict[str, Any] | None:
-    path = AUDIT_DIR / f"{audit_id}.json"
+    try:
+        safe_id = str(uuid.UUID(audit_id))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    path = AUDIT_DIR / f"{safe_id}.json"
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))

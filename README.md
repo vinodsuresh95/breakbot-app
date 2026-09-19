@@ -42,7 +42,8 @@ Open `/bb-command-2026` and enter the same `DASHBOARD_API_KEY` from `.env`.
 | Waitlist | Public `POST /api/waitlist` only |
 | Prospect data | Demo records in repo — use dashboard/localStorage or a DB for real leads |
 
-**Production:** always set a long random `DASHBOARD_API_KEY`. Never commit `backend/.env`.
+**Production:** set `APP_ENV=production` and a long random `DASHBOARD_API_KEY`.
+Protected routes fail closed when the key is missing. Never commit `backend/.env`.
 
 ## Environment variables
 
@@ -50,6 +51,9 @@ Open `/bb-command-2026` and enter the same `DASHBOARD_API_KEY` from `.env`.
 |----------|----------|---------|
 | `ANTHROPIC_API_KEY` | Yes | Powers all 7 agents |
 | `DASHBOARD_API_KEY` | Yes (prod) | Protects dashboard API |
+| `APP_ENV` | Yes (prod) | Set to `production` to enforce fail-closed auth |
+| `FRONTEND_ORIGIN` | Yes (prod) | Allowed Netlify frontend origin |
+| `ALLOW_HTTP_TARGETS` | No | Keep unset; HTTPS audit targets are required by default |
 | `SMTP_*` | For email send | Gmail app password works |
 | `AIRTABLE_*` | Optional | Waitlist → Airtable |
 

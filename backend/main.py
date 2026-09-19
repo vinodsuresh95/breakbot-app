@@ -160,8 +160,9 @@ def auth_verify(_: None = Depends(require_dashboard_key)):
 @app.get("/api/health")
 def health():
     key_set = bool(os.getenv("DASHBOARD_API_KEY", "").strip())
+    production = os.getenv("APP_ENV", "development").strip().lower() in {"production", "prod"}
     return {
-        "status": "ok",
+        "status": "ok" if key_set or not production else "misconfigured",
         "anthropic": bool(os.getenv("ANTHROPIC_API_KEY")),
         "smtp": smtp_configured(),
         "airtable": bool(os.getenv("AIRTABLE_TOKEN") and os.getenv("AIRTABLE_BASE_ID")),
@@ -204,25 +205,8 @@ def agents_chat(req: AgentChatRequest, _: None = Depends(require_dashboard_key))
     if req.prospect:
         system += f"\n\nCurrent prospect context:\n{prospect_prompt(req.prospect.model_dump())}"
 
-    # Detect send-email intent in last user message
-    last_user = next((m["content"] for m in reversed(req.messages) if m.get("role") == "user"), "")
-    send_intent = any(k in last_user.lower() for k in ("send email", "email them", "send outreach", "send now"))
-
     reply = chat_claude(system, req.messages)
-
-    email_action = None
-    if send_intent and req.prospect:
-        p = req.prospect.model_dump()
-        draft = _draft_email_if_needed(p)
-        if p.get("email"):
-            email_action = send_email(
-                to=p["email"],
-                subject=draft.get("subject", "BreakBot — chatbot security audit"),
-                body=draft.get("body", ""),
-            )
-            email_action["draft"] = draft
-
-    return {"reply": reply, "email_action": email_action}
+    return {"reply": reply, "email_action": None, "requires_explicit_send": True}
 
 
 @app.post("/api/brief")
@@ -263,14 +247,11 @@ def _execute_outreach(req: OutreachRunRequest) -> dict[str, Any]:
             schedule = _run_agent("sender", prospect)
             results["sender"] = schedule
 
-    if req.auto_send and prospect.get("email") and prospect.get("draftEmail"):
-        draft = prospect["draftEmail"]
-        email_result = send_email(
-            to=prospect["email"],
-            subject=draft.get("subject", "BreakBot security audit"),
-            body=draft.get("body", ""),
-        )
-        results["email"] = email_result
+    if req.auto_send:
+        results["email"] = {
+            "sent": False,
+            "reason": "Automatic sending is disabled; use the explicit email approval action.",
+        }
 
     return {"prospect": prospect, "results": results}
 
@@ -349,4 +330,4 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.getenv("PORT", "8001"))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import random
 from typing import Any
 
 from probe_registry import get_industry_pack, load_library
@@ -78,8 +77,8 @@ def build_probe_plan(
         by_cat.setdefault(p["category_id"], []).append(p)
 
     picked: list[dict] = []
-    cat_keys = list(by_cat.keys())
-    random.shuffle(cat_keys)
+    # Stable ordering makes repeated audits comparable and reproducible.
+    cat_keys = sorted(by_cat.keys())
     idx = 0
     while len(picked) < n_core and cat_keys:
         cid = cat_keys[idx % len(cat_keys)]

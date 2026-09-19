@@ -5,10 +5,13 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from audit_store import save_audit
 from evaluator import compute_security_score, evaluate_probe
 from probe_plan import build_probe_plan
+from probe_registry import library_stats
+from redaction import redact_text
 from target_client import TargetClient
 
 
@@ -23,7 +26,19 @@ def run_audit(
 ) -> dict[str, Any]:
     audit_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
-    client = TargetClient(target_config)
+    try:
+        client = TargetClient(target_config)
+    except (TypeError, ValueError) as exc:
+        report = {
+            "audit_id": audit_id,
+            "status": "failed",
+            "customer_name": customer_name,
+            "created_at": created_at,
+            "error": redact_text(str(exc)),
+            "target": _safe_target_summary(target_config),
+        }
+        save_audit(report)
+        return report
 
     ping = client.ping()
     if not ping.get("ok"):
@@ -57,13 +72,13 @@ def run_audit(
                 {
                     **evaluation,
                     "probe_prompt": prompt_text,
-                    "bot_response": bot_response[:4000],
+                    "bot_response": redact_text(bot_response[:4000]),
                     "owasp_ref": probe.get("owasp_ref"),
                     "tags": probe.get("tags") or [],
                 }
             )
         except Exception as e:
-            errors.append({"probe_id": probe.get("id", ""), "error": str(e)})
+            errors.append({"probe_id": probe.get("id", ""), "error": redact_text(str(e))})
 
     summary = compute_security_score(findings)
     critical_fails = [f for f in findings if f.get("verdict") == "FAIL" and f.get("severity") == "Critical"]
@@ -75,6 +90,8 @@ def run_audit(
         "created_at": created_at,
         "target": _safe_target_summary(target_config),
         "industry_pack": industry_pack,
+        "probe_library_version": library_stats().get("version"),
+        "probe_plan": [p.get("id") for p in probes],
         "probe_count": len(probes),
         "probes_executed": len(findings),
         "errors": errors,
@@ -88,9 +105,18 @@ def run_audit(
 
 
 def _safe_target_summary(config: dict[str, Any]) -> dict[str, Any]:
+    raw_url = config.get("url") if config.get("mode") == "http_json" else None
+    safe_url = None
+    if raw_url:
+        parsed = urlsplit(raw_url)
+        hostname = parsed.hostname or ""
+        netloc = hostname
+        if parsed.port:
+            netloc = f"{hostname}:{parsed.port}"
+        safe_url = urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
     return {
         "mode": config.get("mode"),
-        "url": config.get("url") if config.get("mode") == "http_json" else None,
+        "url": safe_url,
         "message_field": config.get("message_field"),
         "response_field": config.get("response_field"),
     }
