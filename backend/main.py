@@ -18,6 +18,7 @@ from auth import require_dashboard_key
 from email_service import send_email, smtp_configured
 from ml_scorer import blend_lead_score
 from audit_engine import (
+    plan_probes,
     review_finding,
     run_audit,
     set_report_status,
@@ -106,8 +107,17 @@ class AuditTarget(BaseModel):
     timeout_seconds: float = Field(default=45, ge=1, le=60)
 
 
+class AuditTargetContext(BaseModel):
+    """Facts about the authorized test environment used to build CTX probes."""
+
+    other_account_id: str = Field(default="", max_length=80)
+    action_request: str = Field(default="", max_length=200)
+    kb_topics: list[str] = Field(default_factory=list, max_length=5)
+
+
 class AuditRunRequest(BaseModel):
     target: AuditTarget
+    target_context: AuditTargetContext | None = None
     customer_name: str = ""
     industry_pack: str | None = None
     category_ids: list[str] | None = None
@@ -332,9 +342,15 @@ def audit_run(req: AuditRunRequest, _: None = Depends(require_dashboard_key)):
             status_code=400,
             detail="You must confirm you have authorization to test this target.",
         )
-    from probe_plan import build_probe_plan
+    target_context = req.target_context.model_dump() if req.target_context else None
     try:
-        build_probe_plan(industry_pack=req.industry_pack, category_ids=req.category_ids, probe_ids=req.probe_ids, max_probes=req.max_probes)
+        plan_probes(
+            industry_pack=req.industry_pack,
+            category_ids=req.category_ids,
+            probe_ids=req.probe_ids,
+            max_probes=req.max_probes,
+            target_context=target_context,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     report = run_audit(
@@ -345,6 +361,7 @@ def audit_run(req: AuditRunRequest, _: None = Depends(require_dashboard_key)):
         probe_ids=req.probe_ids,
         max_probes=req.max_probes,
         retest_of=req.retest_of,
+        target_context=target_context,
         scope={
             "authorization_notes": req.authorization_notes,
             "testing_window": req.testing_window,

@@ -16,6 +16,9 @@ const SecurityAuditPanel = forwardRef(function SecurityAuditPanel({ scrollToHist
   const [customerName, setCustomerName] = useState('')
   const [industryPack, setIndustryPack] = useState('FIN')
   const [modelUnderTest, setModelUnderTest] = useState('')
+  const [otherAccountId, setOtherAccountId] = useState('')
+  const [actionRequest, setActionRequest] = useState('')
+  const [kbTopics, setKbTopics] = useState('')
   const [maxProbes, setMaxProbes] = useState(8)
   const [authorized, setAuthorized] = useState(false)
   const [authNotes, setAuthNotes] = useState('')
@@ -51,6 +54,12 @@ const SecurityAuditPanel = forwardRef(function SecurityAuditPanel({ scrollToHist
     if (scrollToHistory) historyRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [scrollToHistory])
 
+  const targetContext = () => {
+    const topics = kbTopics.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 5)
+    if (!otherAccountId.trim() && !actionRequest.trim() && !topics.length) return null
+    return { other_account_id: otherAccountId.trim(), action_request: actionRequest.trim(), kb_topics: topics }
+  }
+
   const runAudit = async () => {
     if (mode === 'http_json' && (!url.trim() || !authNotes.trim())) {
       setError('Enter a staging URL and authorization notes.')
@@ -64,6 +73,7 @@ const SecurityAuditPanel = forwardRef(function SecurityAuditPanel({ scrollToHist
         customer_name: customerName || 'Unnamed target',
         industry_pack: industryPack || null,
         max_probes: maxProbes,
+        target_context: targetContext(),
         authorization_confirmed: authorized,
         authorization_notes: authNotes + (modelUnderTest ? ` | Model under test: ${modelUnderTest}` : ''),
         testing_window: testingWindow,
@@ -101,6 +111,7 @@ const SecurityAuditPanel = forwardRef(function SecurityAuditPanel({ scrollToHist
         probe_ids: report.probe_plan,
         max_probes: report.probe_plan.length,
         retest_of: report.audit_id,
+        target_context: report.target_context && Object.keys(report.target_context).length ? report.target_context : null,
         authorization_confirmed: authorized,
         authorization_notes: authNotes,
         testing_window: testingWindow,
@@ -284,6 +295,26 @@ const SecurityAuditPanel = forwardRef(function SecurityAuditPanel({ scrollToHist
             style={inp}
           />
 
+          <label style={lbl}>App context (recommended — adds targeted access, action and RAG probes)</label>
+          <input
+            value={otherAccountId}
+            onChange={(e) => setOtherAccountId(e.target.value)}
+            placeholder="Another test user's account ID, e.g. C-2002"
+            style={{ ...inp, marginBottom: 6 }}
+          />
+          <input
+            value={actionRequest}
+            onChange={(e) => setActionRequest(e.target.value)}
+            placeholder="An out-of-policy action, e.g. Refund $450 to my account"
+            style={{ ...inp, marginBottom: 6 }}
+          />
+          <input
+            value={kbTopics}
+            onChange={(e) => setKbTopics(e.target.value)}
+            placeholder="Knowledge-base topics, comma-separated (max 5)"
+            style={inp}
+          />
+
           {/* Step B — Authorization */}
           <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: C.cyan, letterSpacing: '.1em', margin: '18px 0 10px' }}>
             STEP B · AUTHORIZATION
@@ -383,7 +414,7 @@ const SecurityAuditPanel = forwardRef(function SecurityAuditPanel({ scrollToHist
           </div>
 
           <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-            <Stat label="Score" value={`${score.score ?? '—'}/100`} sub={`Grade ${score.grade || '—'}`} />
+            <Stat label="Score" value={`${score.score ?? '—'}/100`} sub={`Grade ${score.grade || '—'}${score.grade_cap ? ` · capped: ${score.grade_cap}` : ''}`} />
             <Stat label="Fails" value={score.fail_count} color={C.red} />
             <Stat label="Partial" value={score.partial_count} color={C.amb} />
             <Stat label="Pass" value={score.pass_count} color={C.grn} />

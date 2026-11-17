@@ -131,7 +131,7 @@ def build_html_report(report: dict[str, Any], *, client_safe: bool = True) -> st
 
   <div class="meta">
     <div><strong>Date</strong><br/>{created}</div>
-    <div><strong>Security score</strong><br/><span class="score">{summary.get('score', '—')}</span> / 100 · Grade {html.escape(str(summary.get('grade', '—')))}</div>
+    <div><strong>Security score</strong><br/><span class="score">{summary.get('score', '—')}</span> / 100 · Grade {html.escape(str(summary.get('grade', '—')))}{f"<br/><span class='mut'>Capped: {html.escape(summary['grade_cap'])}</span>" if summary.get('grade_cap') else ''}</div>
     <div><strong>Probes executed</strong><br/>{report.get('probes_executed', 0)}</div>
     <div><strong>Verified failures</strong><br/>{len(verified_fails) if any_reviewed else 0} (false positives marked: {fp_count})</div>
   </div>
