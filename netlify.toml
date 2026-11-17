@@ -2,6 +2,16 @@
   command = "npm run build"
   publish = "dist"
 
+[[redirects]]
+  from = "/api/auth/verify"
+  to = "/.netlify/functions/auth-verify"
+  status = 200
+
+[[redirects]]
+  from = "/api/waitlist"
+  to = "/.netlify/functions/waitlist"
+  status = 200
+
 # SPA routing — dashboard at /bb-command-2026
 [[redirects]]
   from = "/*"

@@ -1,7 +1,18 @@
-exports.handler = async (event) => {
+import { enforce, envLimit } from "../lib/rate-limit.js";
+
+export const handler = async (event) => {
   const cors = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" };
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: cors, body: "" };
   if (event.httpMethod !== "POST") return { statusCode: 405, headers: cors, body: "Method not allowed" };
+
+  // Fail open: a limiter outage should never lose a lead.
+  const limited = await enforce(event, {
+    name: "waitlist",
+    perIp: envLimit("WAITLIST_RATE_PER_IP", 5),
+    windowSec: 3600,
+    daily: envLimit("WAITLIST_DAILY_CAP", 300),
+  }, cors, { failOpen: true });
+  if (limited) return limited;
 
   try {
     const data = JSON.parse(event.body || "{}");
@@ -9,7 +20,7 @@ exports.handler = async (event) => {
     const airtableBase = process.env.AIRTABLE_BASE_ID;
 
     // Log even if Airtable not configured
-    console.log("Waitlist submission:", JSON.stringify(data));
+    console.log("Waitlist submission received from source:", data.source || "website");
 
     if (airtableToken && airtableBase) {
       const res = await fetch(`https://api.airtable.com/v0/${airtableBase}/Leads`, {

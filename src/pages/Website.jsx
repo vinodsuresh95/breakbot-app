@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { INDUSTRY_PACKS, TOTAL_LIBRARY, CORE_PROBES, INDUSTRY_PACK_COUNT, HEADLINE_PROBES } from '../data/industryPacks.js'
+import LiveDemo from '../components/LiveDemo.jsx'
 import './Website.css'
 
 export default function Website() {
@@ -41,12 +42,16 @@ export default function Website() {
       source:  'website',
     }
     try {
-      await fetch('/api/waitlist', {
+      const response = await fetch('/api/waitlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       })
-    } catch {}
+      if (!response.ok) throw new Error('Could not save your request. Please try again later.')
+    } catch (error) {
+      window.alert(error.message || 'Unable to connect. Please try again later.')
+      return
+    }
     form.style.display = 'none'
     document.getElementById('wlSuccess').style.display = 'block'
   }
@@ -60,8 +65,10 @@ export default function Website() {
           <span className="logo-text">BREAK<span>BOT</span></span>
         </div>
         <ul className="nav-links">
+          <li><a href="#demo">Live demo</a></li>
           <li><a href="#how">How it works</a></li>
-          <li><a href="#tests">What we test</a></li>
+          <li><a href="#platform">Platform</a></li>
+          <li><a href="#tests">Attack library</a></li>
           <li><a href="#industries">Industries</a></li>
           <li><a href="#waitlist" className="nav-cta">Get free audit</a></li>
         </ul>
@@ -70,12 +77,11 @@ export default function Website() {
       {/* ── HERO ── */}
       <section className="hero" id="home">
         <div className="hero-grid" />
-        <p className="hero-eyebrow">AI Chatbot Security Testing</p>
-        <h1>We <em>break</em> your chatbot.<br/><strong>Before attackers do.</strong></h1>
+        <p className="hero-eyebrow">AI Agent Security Platform</p>
+        <h1>BreakBot attacks your<br/><em>AI agent before attackers do.</em></h1>
         <p className="hero-sub">
-          Send us your chatbot. We run <strong>{HEADLINE_PROBES} adversarial attacks</strong> — jailbreaks,
-          data leaks, harmful outputs, compliance failures — and send you a full report of
-          every vulnerability within 24 hours.
+          Find exploitable failures across models, RAG, memory, tools, APIs, and multi-agent workflows.
+          Get reproducible evidence, remediation guidance, and proof that the fix actually worked.
         </p>
         <div className="hero-btns">
           <button className="btn-primary"
@@ -83,20 +89,20 @@ export default function Website() {
             Get free audit ↗
           </button>
           <button className="btn-secondary"
-            onClick={() => document.getElementById('how').scrollIntoView({ behavior: 'smooth' })}>
-            See how it works
+            onClick={() => document.getElementById('demo').scrollIntoView({ behavior: 'smooth' })}>
+            Try the live demo
           </button>
         </div>
-        <div className="hero-note">First 100 companies · Free · No credit card needed</div>
+        <div className="hero-note">Free first scan · Authorized staging targets · Reviewed findings in 24 hours</div>
       </section>
 
       {/* ── PROOF STRIP ── */}
       <div className="proof-strip">
         {[
-          { val: HEADLINE_PROBES, label: 'adversarial probes' },
-          { val: String(INDUSTRY_PACK_COUNT), label: 'industry packs' },
-          { val: String(CORE_PROBES), label: 'core OWASP tests' },
-          { val: '24h', label: 'report delivery' },
+          { val: 'Attack', label: 'adversarial testing' },
+          { val: 'Prove', label: 'reproducible evidence' },
+          { val: 'Fix', label: 'targeted remediation' },
+          { val: 'Retest', label: 'before / after proof' },
         ].map((p, i) => (
           <div key={i} className="proof-item">
             <div className="proof-dot" />
@@ -104,6 +110,33 @@ export default function Website() {
           </div>
         ))}
       </div>
+
+      <LiveDemo />
+
+      {/* ── PLATFORM LAYERS ── */}
+      <section className="platform-sec" id="platform">
+        <div className="container">
+          <div className="reveal">
+            <p className="sec-label">Production agent security</p>
+            <h2 className="sec-title">Test what your AI says.<br/><em>And what it does.</em></h2>
+            <p className="sec-sub">BreakBot follows the full attack path across the model, RAG, memory, tools, APIs, databases, and connected agents.</p>
+          </div>
+          <div className="agent-chain reveal">
+            {['User', 'Agent', 'RAG + Memory', 'Tools + APIs', 'Database', 'Other agents'].map((item, i) => (
+              <div className="chain-node" key={item}><span>{String(i + 1).padStart(2, '0')}</span>{item}</div>
+            ))}
+          </div>
+          <div className="platform-grid reveal">
+            {[
+              { n:'01', h:'Attack', p:'Prompt injection, jailbreaks, data exfiltration, authorization bypass, memory poisoning, tool abuse, and unsafe workflow execution.' },
+              { n:'02', h:'Evidence', p:'Exact prompt, model response, tool action, policy failure, trace, and reproduction steps for every finding.' },
+              { n:'03', h:'Risk', p:'Severity, exploitability, business impact, likelihood, and compliance mapping in one reviewed finding.' },
+              { n:'04', h:'Fix', p:'Concrete guardrail, permission, prompt, configuration, and architecture recommendations tied to the exploit.' },
+              { n:'05', h:'Retest', p:'Replay the exact attack after remediation and compare score and failed attacks before and after.' },
+            ].map(x => <div className="platform-card" key={x.h}><span>{x.n}</span><h3>{x.h}</h3><p>{x.p}</p></div>)}
+          </div>
+        </div>
+      </section>
 
       {/* ── MARQUEE ── */}
       <div className="marquee-wrap">
@@ -125,23 +158,23 @@ export default function Website() {
         <div className="container">
           <div className="reveal">
             <p className="sec-label">How it works</p>
-            <h2 className="sec-title">Three steps.<br/><em>One report.</em></h2>
-            <p className="sec-sub">No setup required. No SDK to install. No engineers needed on your side.</p>
+            <h2 className="sec-title">From attack to<br/><em>verified remediation.</em></h2>
+            <p className="sec-sub">Start with an authorized staging agent. Keep the evidence and regression test after the fix.</p>
           </div>
           <div className="how-grid">
             <div className="reveal how-steps">
               {[
                 {
-                  n: '01', h: 'Share your chatbot',
-                  p: 'Give us your chatbot\'s API endpoint or URL. Works with any chatbot — customer support bots, AI assistants, WhatsApp bots, website widgets, anything with an API.',
+                  n: '01', h: 'Connect the staging agent',
+                  p: 'Define the authorized endpoint, model, RAG, tools, data access, and testing boundaries.',
                 },
                 {
-                  n: '02', h: `We run ${HEADLINE_PROBES} adversarial tests`,
-                  p: `${TOTAL_LIBRARY} probes in our library — core OWASP coverage plus your industry pack. Jailbreaks, prompt injections, data leaks, harmful advice, PAP attacks, agentic exploits. Every single one relevant to your bot.`,
+                  n: '02', h: 'Run adversarial attacks',
+                  p: 'Select relevant attacks from the core, agent capability, compliance, and industry libraries.',
                 },
                 {
-                  n: '03', h: 'You get the full report',
-                  p: 'Within 24 hours: a detailed PDF with every failure, evidence of the exact conversation that triggered it, severity score, OWASP mapping, and a specific fix recommendation.',
+                  n: '03', h: 'Review evidence and fix',
+                  p: 'Validate each finding, inspect the exact exploit, apply targeted remediation, then replay the same attack to prove the risk is reduced.',
                 },
               ].map((s, i) => (
                 <div key={i} className="step">
@@ -152,9 +185,10 @@ export default function Website() {
             </div>
             <div className="reveal report-mock">
               <div className="rm-header">
-                <span className="rm-title">BREAKBOT AUDIT REPORT</span>
-                <div className="rm-score">34</div>
+                <span className="rm-title">BREAKBOT RETEST</span>
+                <div className="rm-score">86</div>
               </div>
+              <div className="rm-compare"><span>Before fix <strong>43 failed</strong></span><span>After fix <strong>7 failed</strong></span></div>
               {[
                 { n: 'Revealed internal system prompt',      b: 'bc', l: 'Critical' },
                 { n: 'Gave dangerous medical advice',        b: 'bc', l: 'Critical' },
