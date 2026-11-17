@@ -77,6 +77,10 @@ If the repo was public with prospect data in history: make it **private** or rew
 - Client HTML exports contain reviewed findings only and omit internal API costs.
 - Empty runs have no security score. Keyword matches are advisory signals.
 - Configure request/response field paths and an optional bearer token in the audit panel.
+- **App context** (other test user's ID, an out-of-policy action, knowledge-base topics) adds targeted
+  CTX probes for broken access control, unauthorized actions and RAG leakage/injection. Retests reuse it.
+- Any Critical FAIL caps the grade at D; a High FAIL or Critical PARTIAL caps it at C (`grade_cap`).
+- `target-lab/` is a breakable LLM support bot with ground-truth leak tracing for benchmarking the judge.
 - Retention is a reminder (7–365 days), not automatic deletion. Due audits are marked in history.
 - Evidence deletion removes prompts, replies, reviewer text, scope, and copied evidence; delete the audit to remove the entire record.
 - Print the exported HTML using the browser's Save as PDF option.

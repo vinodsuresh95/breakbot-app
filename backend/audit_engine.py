@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from audit_store import load_audit, save_audit
+from context_probes import CATEGORY_ID as CONTEXT_CATEGORY_ID, build_context_probes
 from evaluator import compute_security_score, evaluate_probe
 from probe_plan import build_probe_plan
 from probe_registry import library_stats
@@ -122,6 +123,7 @@ def strip_evidence(audit_id: str) -> dict[str, Any]:
                 f[field] = "[evidence deleted]"
     report["errors"] = []
     report["scope"] = {}
+    report["target_context"] = {}
     report["remediation"] = []
     report["report_status"] = "Draft"
     report["customer_name"] = "[client details deleted]"
@@ -130,6 +132,37 @@ def strip_evidence(audit_id: str) -> dict[str, Any]:
     report["evidence_stripped_at"] = datetime.now(timezone.utc).isoformat()
     save_audit(report)
     return report
+
+
+def plan_probes(
+    *,
+    industry_pack: str | None = None,
+    category_ids: list[str] | None = None,
+    probe_ids: list[str] | None = None,
+    max_probes: int = 15,
+    target_context: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Context probes first, then up to max_probes library probes (50 in total)."""
+    context = build_context_probes(target_context)
+    library_ids = None
+    if probe_ids:
+        prefix = f"{CONTEXT_CATEGORY_ID}-"
+        wanted = [pid for pid in probe_ids if pid.startswith(prefix)]
+        context = [p for p in context if p["id"] in wanted]
+        if len(context) != len(set(wanted)):
+            raise ValueError("Context probes need the same target context as the original audit")
+        library_ids = [pid for pid in probe_ids if not pid.startswith(prefix)]
+
+    library: list[dict[str, Any]] = []
+    room = 50 - len(context)
+    if room > 0 and (library_ids or not probe_ids):
+        library = build_probe_plan(
+            industry_pack=industry_pack,
+            category_ids=category_ids,
+            probe_ids=library_ids,
+            max_probes=max(1, min(max_probes, room)),
+        )
+    return context + library
 
 
 def run_audit(
@@ -142,12 +175,14 @@ def run_audit(
     max_probes: int = 15,
     retest_of: str | None = None,
     scope: dict[str, Any] | None = None,
+    target_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    probes = build_probe_plan(
+    probes = plan_probes(
         industry_pack=industry_pack,
         category_ids=category_ids,
         probe_ids=probe_ids,
-        max_probes=max(1, min(max_probes, 50)),
+        max_probes=max_probes,
+        target_context=target_context,
     )
 
     audit_id = str(uuid.uuid4())
@@ -234,6 +269,7 @@ def run_audit(
         "target": _safe_target_summary(target_config),
         "scope": scope or {},
         "industry_pack": industry_pack,
+        "target_context": target_context or {},
         "probe_library_version": library_stats().get("version"),
         "probe_plan": [p.get("id") for p in probes],
         "probe_count": len(probes),
@@ -319,6 +355,13 @@ def _hint_for(finding: dict[str, Any]) -> str:
         return "Harden instruction hierarchy; never echo system prompts; use input sanitization and tool-guardrails."
     if cat.startswith("LLM02"):
         return "Add jailbreak regression tests; layer policy filters on outputs; block DAN-style mode switches."
+    if cat == CONTEXT_CATEGORY_ID:
+        tags = set(finding.get("tags") or [])
+        if "idor" in tags:
+            return "Enforce object ownership in the tool or API layer using the session identity, never the model's judgment."
+        if "excessive_agency" in tags:
+            return "Enforce action limits server-side in the tool; require human approval above the limit regardless of claimed roles."
+        return "Filter retrieval by the user's access level and treat retrieved text as untrusted data, never as instructions."
     if "system_prompt" in str(finding.get("key_issue") or ""):
         return "Strip meta-instructions from model outputs; refuse verbatim instruction dumps."
     if finding.get("verdict") == "FAIL":
