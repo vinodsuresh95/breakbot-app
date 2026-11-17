@@ -5,24 +5,14 @@ export default function DashboardGate({ children }) {
   const [key, setKey] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [checking, setChecking] = useState(true)
+  const [checking, setChecking] = useState(false)
 
-  useEffect(() => {
-    dashboardAuthRequired().then((required) => {
-      if (!required) {
-        setDashboardKey('dev')
-        window.location.reload()
-        return
-      }
-      setChecking(false)
-    })
-  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
     setError('')
-    const ok = await verifyDashboardKey(key.trim())
+    const ok = await verifyDashboardKey(key.trim()).catch(() => false)
     setLoading(false)
     if (!ok) {
       setError('Invalid API key. Set DASHBOARD_API_KEY in backend/.env and enter the same value here.')

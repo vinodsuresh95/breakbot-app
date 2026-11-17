@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useImperativeHandle, forwardRef } from 'react'
 import * as backend from '../lib/api.js'
 import { INDUSTRY_PACKS } from '../data/industryPacks.js'
 
@@ -7,27 +7,55 @@ const C = {
   grn: '#2dba6e', red: '#E8341A', amb: '#e09a20', cyan: '#06b6d4',
 }
 
-export default function SecurityAuditPanel() {
+const SecurityAuditPanel = forwardRef(function SecurityAuditPanel({ scrollToHistory = false }, ref) {
   const [mode, setMode] = useState('demobot')
   const [url, setUrl] = useState('')
+  const [bearer, setBearer] = useState('')
+  const [messageField, setMessageField] = useState('message')
+  const [responseField, setResponseField] = useState('response')
   const [customerName, setCustomerName] = useState('')
   const [industryPack, setIndustryPack] = useState('FIN')
+  const [modelUnderTest, setModelUnderTest] = useState('')
   const [maxProbes, setMaxProbes] = useState(8)
   const [authorized, setAuthorized] = useState(false)
   const [authNotes, setAuthNotes] = useState('')
   const [testingWindow, setTestingWindow] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [running, setRunning] = useState(false)
   const [report, setReport] = useState(null)
   const [history, setHistory] = useState([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
+  const urlRef = useRef(null)
+  const historyRef = useRef(null)
+
+  useImperativeHandle(ref, () => ({
+    focusUrl: () => {
+      setMode('http_json')
+      setTimeout(() => urlRef.current?.focus(), 80)
+    },
+    useDemobot: () => {
+      setMode('demobot')
+    },
+    scrollHistory: () => {
+      historyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    },
+  }))
 
   const refreshHistory = () =>
     backend.listAudits(15).then((r) => setHistory(r.audits || [])).catch(() => {})
 
   useEffect(() => { refreshHistory() }, [report])
 
+  useEffect(() => {
+    if (scrollToHistory) historyRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [scrollToHistory])
+
   const runAudit = async () => {
+    if (mode === 'http_json' && (!url.trim() || !authNotes.trim())) {
+      setError('Enter a staging URL and authorization notes.')
+      return
+    }
     setError('')
     setRunning(true)
     setReport(null)
@@ -37,13 +65,14 @@ export default function SecurityAuditPanel() {
         industry_pack: industryPack || null,
         max_probes: maxProbes,
         authorization_confirmed: authorized,
-        authorization_notes: authNotes,
+        authorization_notes: authNotes + (modelUnderTest ? ` | Model under test: ${modelUnderTest}` : ''),
         testing_window: testingWindow,
         target: {
           mode,
           url: mode === 'http_json' ? url : '',
-          message_field: 'message',
-          response_field: 'response',
+          message_field: messageField,
+          response_field: responseField,
+          auth_bearer: bearer || null,
         },
       })
       setReport(result)
@@ -51,6 +80,43 @@ export default function SecurityAuditPanel() {
     } catch (e) {
       setError(e.message || 'Audit failed')
     } finally {
+      setBearer('')
+      setRunning(false)
+    }
+  }
+
+  const runRetest = async () => {
+    if (!report?.audit_id || !(report.probe_plan || []).length) return
+    if (!authorized) { setError('Confirm written authorization again before retesting.'); return }
+    if (mode === 'http_json' && (!url.trim() || !authNotes.trim())) {
+      setError('Re-enter the staging URL, credentials, and authorization notes before retesting.')
+      return
+    }
+    setError('')
+    setRunning(true)
+    try {
+      const result = await backend.runSecurityAudit({
+        customer_name: customerName || report.customer_name || 'Retest',
+        industry_pack: report.industry_pack || industryPack || null,
+        probe_ids: report.probe_plan,
+        max_probes: report.probe_plan.length,
+        retest_of: report.audit_id,
+        authorization_confirmed: authorized,
+        authorization_notes: authNotes,
+        testing_window: testingWindow,
+        target: {
+          mode,
+          url: mode === 'http_json' ? url : '',
+          message_field: messageField,
+          response_field: responseField,
+          auth_bearer: bearer || null,
+        },
+      })
+      setReport(result)
+    } catch (e) {
+      setError(e.message || 'Retest failed')
+    } finally {
+      setBearer('')
       setRunning(false)
     }
   }
@@ -59,7 +125,8 @@ export default function SecurityAuditPanel() {
     if (!report?.audit_id) return
     setBusy(probeId)
     try {
-      const notes = window.prompt('Reviewer notes (optional)', '') ?? ''
+      const notes = window.prompt('Reviewer notes (optional)', '')
+      if (notes === null) return
       const updated = await backend.reviewFinding(report.audit_id, {
         probe_id: probeId,
         review_status,
@@ -119,25 +186,83 @@ export default function SecurityAuditPanel() {
 
   return (
     <div style={{ padding: 20, overflow: 'auto', flex: 1 }}>
-      <p style={{ color: C.mut, fontSize: 12, maxWidth: 720, lineHeight: 1.6, marginBottom: 16 }}>
-        <strong style={{ color: C.cream }}>Local Client Audit Edition</strong> — run on your Mac only (127.0.0.1).
-        Always get written authorization, review every FAIL/PARTIAL yourself, then export a client report.
-        Never send raw AI output without review.
+      {/* Flow strip */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+        {['URL', 'Probes', 'Human review', 'Final report'].map((label, i) => (
+          <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{
+              fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, padding: '5px 10px',
+              borderRadius: 6, background: C.sur2, color: C.cyan, border: `1px solid ${C.bdr}`,
+            }}>{label}</span>
+            {i < 3 && <span style={{ color: C.mut, fontSize: 12 }}>→</span>}
+          </span>
+        ))}
+      </div>
+
+      <p style={{ color: C.mut, fontSize: 12, maxWidth: 780, lineHeight: 1.6, marginBottom: 8 }}>
+        <strong style={{ color: C.cream }}>New Client Audit</strong> — model-agnostic endpoint testing.
+        AI verdicts are advisory; you confirm findings before any client deliverable.
+      </p>
+      <p style={{ color: C.mut, fontSize: 11, marginBottom: 16, maxWidth: 780 }}>
+        Current engine: text/response probes. Tool / MCP action sandbox — coming next.
       </p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 980 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 16, maxWidth: 1040 }}>
         <div style={{ background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 10, padding: 16 }}>
-          <label style={lbl}>Target mode</label>
-          <select value={mode} onChange={(e) => setMode(e.target.value)} style={inp}>
-            <option value="demobot">Internal demo bot (practice)</option>
-            <option value="http_json">Client staging HTTP API</option>
-          </select>
+          {/* Step A — Target */}
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: C.cyan, letterSpacing: '.1em', marginBottom: 10 }}>
+            STEP A · TARGET
+          </div>
 
-          {mode === 'http_json' && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <button
+              type="button"
+              onClick={() => setMode('http_json')}
+              style={modeToggle(mode === 'http_json')}
+            >
+              Client staging API
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('demobot')}
+              style={modeToggle(mode === 'demobot')}
+            >
+              Practice demo bot
+            </button>
+          </div>
+
+          {mode === 'http_json' ? (
             <>
-              <label style={lbl}>Staging chatbot URL</label>
-              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://staging.client.com/chat" style={inp} />
+              <label style={lbl}>Client staging URL</label>
+              <input
+                ref={urlRef}
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://staging.client.com/chat"
+                style={{ ...inp, fontSize: 14, padding: '12px 14px', borderColor: C.cyan }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                style={{ background: 'none', border: 'none', color: C.mut, fontSize: 10, marginTop: 8, cursor: 'pointer', fontFamily: "'IBM Plex Mono',monospace" }}
+              >
+                {showAdvanced ? '▾ Hide advanced' : '▸ Advanced (bearer, field names)'}
+              </button>
+              {showAdvanced && (
+                <>
+                  <label style={lbl}>Bearer token (cleared after run; never stored)</label>
+                  <input type="password" value={bearer} onChange={(e) => setBearer(e.target.value)} style={inp} />
+                  <label style={lbl}>Request message field</label>
+                  <input value={messageField} onChange={(e) => setMessageField(e.target.value)} style={inp} />
+                  <label style={lbl}>Response field</label>
+                  <input value={responseField} onChange={(e) => setResponseField(e.target.value)} style={inp} />
+                </>
+              )}
             </>
+          ) : (
+            <p style={{ color: C.mut, fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+              Uses BreakBot’s intentionally weak internal demo bot — safe for practice, no client URL needed.
+            </p>
           )}
 
           <label style={lbl}>Client / project name</label>
@@ -145,24 +270,60 @@ export default function SecurityAuditPanel() {
 
           <label style={lbl}>Industry pack</label>
           <select value={industryPack} onChange={(e) => setIndustryPack(e.target.value)} style={inp}>
+            <option value="">Core only</option>
             {INDUSTRY_PACKS.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
 
-          <label style={lbl}>Probe count ({maxProbes}) — start with 3–8, then 25–50</label>
-          <input type="range" min={3} max={50} value={maxProbes} onChange={(e) => setMaxProbes(Number(e.target.value))} style={{ width: '100%' }} />
+          <label style={lbl}>Model under test (optional — for your notes)</label>
+          <input
+            value={modelUnderTest}
+            onChange={(e) => setModelUnderTest(e.target.value)}
+            placeholder="e.g. Claude / GPT-4o / Llama / unknown"
+            style={inp}
+          />
 
+          {/* Step B — Authorization */}
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: C.cyan, letterSpacing: '.1em', margin: '18px 0 10px' }}>
+            STEP B · AUTHORIZATION
+          </div>
           <label style={lbl}>Authorization notes</label>
-          <input value={authNotes} onChange={(e) => setAuthNotes(e.target.value)} placeholder="Email from CTO 19 Sep — staging only" style={inp} />
-
+          <input value={authNotes} onChange={(e) => setAuthNotes(e.target.value)} placeholder="Email from CTO — staging only" style={inp} />
           <label style={lbl}>Testing window</label>
-          <input value={testingWindow} onChange={(e) => setTestingWindow(e.target.value)} placeholder="19 Sep 10:00–14:00 IST" style={inp} />
-
+          <input value={testingWindow} onChange={(e) => setTestingWindow(e.target.value)} placeholder="25 Oct 10:00–14:00 IST" style={inp} />
           <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
             <input type="checkbox" checked={authorized} onChange={(e) => setAuthorized(e.target.checked)} />
             Written authorization confirmed for this staging target
           </label>
+
+          {/* Step C — Run */}
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: C.cyan, letterSpacing: '.1em', margin: '18px 0 10px' }}>
+            STEP C · RUN
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            {[
+              { n: 3, l: 'Ping' },
+              { n: 8, l: 'Pilot' },
+              { n: 25, l: 'Full' },
+            ].map((p) => (
+              <button
+                key={p.n}
+                type="button"
+                onClick={() => setMaxProbes(p.n)}
+                style={{
+                  ...smBtn,
+                  background: maxProbes === p.n ? 'rgba(6,182,212,.15)' : C.sur2,
+                  borderColor: maxProbes === p.n ? C.cyan : C.bdr,
+                  color: maxProbes === p.n ? C.cyan : C.cream,
+                }}
+              >
+                {p.n} · {p.l}
+              </button>
+            ))}
+          </div>
+          <label style={lbl}>Probe count ({maxProbes})</label>
+          <input type="range" min={3} max={50} value={maxProbes} onChange={(e) => setMaxProbes(Number(e.target.value))} style={{ width: '100%' }} />
 
           <button type="button" onClick={runAudit} disabled={running || !authorized} style={btn}>
             {running ? 'Running audit…' : 'Run security audit'}
@@ -170,31 +331,53 @@ export default function SecurityAuditPanel() {
           {error && <p style={{ color: C.red, fontSize: 11, marginTop: 10 }}>{error}</p>}
         </div>
 
-        <div style={{ background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 10, padding: 16 }}>
+        <div ref={historyRef} style={{ background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 10, padding: 16 }}>
           <div style={{ fontSize: 11, color: C.mut, marginBottom: 8 }}>Recent audits (local disk only)</div>
-          {history.length === 0 && <p style={{ color: C.mut, fontSize: 11 }}>No audits yet.</p>}
+          {history.length === 0 && <p style={{ color: C.mut, fontSize: 11 }}>No audits yet — run a pilot above.</p>}
           {history.map((a) => (
             <button
               key={a.audit_id}
               type="button"
-              onClick={() => backend.getAudit(a.audit_id).then(setReport).catch(() => {})}
+              onClick={() => backend.getAudit(a.audit_id).then(setReport).catch((e) => setError(e.message))}
               style={{ display: 'block', width: '100%', textAlign: 'left', background: C.sur2, border: `1px solid ${C.bdr}`, borderRadius: 6, padding: 8, marginBottom: 6, color: C.cream, cursor: 'pointer', fontSize: 11 }}
             >
-              {a.customer_name || 'Audit'} · {a.report_status || 'Draft'} · score {a.security_score ?? '—'}
+              {a.retention_due ? '⚠ Retention due · ' : ''}{a.customer_name || 'Audit'} · {a.report_status || 'Draft'} · score {a.security_score ?? '—'}
               {a.estimated_usd != null && <> · ~${a.estimated_usd}</>}
             </button>
           ))}
         </div>
       </div>
 
-      {report && report.status === 'completed' && (
-        <div style={{ marginTop: 20, maxWidth: 980 }}>
+      {report && (
+        <div style={{ marginTop: 20, maxWidth: 1040 }}>
+          <div style={{
+            background: 'rgba(224,154,32,.1)', border: `1px solid rgba(224,154,32,.35)`,
+            borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: C.amb, fontSize: 12,
+          }}>
+            AI verdicts are advisory — confirm every FAIL / PARTIAL before marking Final. Raw automated logs are not auditor-ready.
+          </div>
+
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
             <span style={{ fontSize: 12, color: C.cream }}>Report: <strong>{report.report_status || 'Draft'}</strong></span>
             <button type="button" style={smBtn} onClick={() => setStatus('Draft')}>Draft</button>
             <button type="button" style={smBtn} onClick={() => setStatus('Reviewed')}>Reviewed</button>
             <button type="button" style={{ ...smBtn, background: C.grn, color: '#000' }} onClick={() => setStatus('Final')}>Final</button>
             <button type="button" style={smBtn} onClick={doExport}>Export HTML report</button>
+            <button type="button" style={{ ...smBtn, borderColor: C.cyan, color: C.cyan }} disabled={running} onClick={runRetest}>Replay exact attacks</button>
+            {typeof backend.setAuditRetention === 'function' && (
+              <label style={lbl}>Retention reminder
+                <select
+                  value={report.retention_days || 30}
+                  style={inp}
+                  onChange={async (e) => {
+                    try { setReport(await backend.setAuditRetention(report.audit_id, Number(e.target.value))) }
+                    catch (err) { setError(err.message) }
+                  }}
+                >
+                  {[7, 14, 30, 60, 90, 180, 365].map((days) => <option key={days} value={days}>{days} days</option>)}
+                </select>
+              </label>
+            )}
             <button type="button" style={smBtn} onClick={doStrip}>Delete evidence</button>
             <button type="button" style={{ ...smBtn, borderColor: C.red, color: C.red }} onClick={doDelete}>Delete audit</button>
           </div>
@@ -210,6 +393,23 @@ export default function SecurityAuditPanel() {
             <Stat label="False positives" value={cost.false_positive_count ?? 0} />
           </div>
 
+          {report.retest && (
+            <div style={{ background: C.sur, border: `1px solid ${C.cyan}`, borderRadius: 10, padding: 14, marginBottom: 16 }}>
+              <div style={{ color: C.cyan, fontSize: 10, textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 8 }}>Retest comparison · {report.retest.status}</div>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', color: C.cream, fontSize: 13 }}>
+                <span>Before: <strong>{report.retest.before_fail_count} failed</strong> · score {report.retest.before_score ?? '—'}</span>
+                <span>After: <strong>{report.retest.after_fail_count} failed</strong> · score {report.retest.after_score ?? '—'}</span>
+                <span style={{ color: C.grn }}><strong>{report.retest.failures_resolved}</strong> resolved</span>
+              </div>
+            </div>
+          )}
+
+          <p style={{ color: C.amb }}>
+            Execution: {report.status} · {(report.findings || []).filter((f) => !f.review_status || f.review_status === 'pending').length} pending reviews · {(report.errors || []).length} execution errors
+          </p>
+          {(report.errors || []).map((e, i) => <p key={i} style={{ color: C.red }}>{e.probe_id}: {e.error}</p>)}
+          {report.error && <p style={{ color: C.red }}>{report.error}</p>}
+
           <h3 style={h3}>Manual review — confirm or mark false positive before export</h3>
           {(report.findings || []).map((f, i) => (
             <div key={i} style={{ background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 8, padding: 12, marginBottom: 8, fontSize: 11 }}>
@@ -220,10 +420,11 @@ export default function SecurityAuditPanel() {
                 {f.reviewer_verdict && <span style={{ color: C.cream }}>→ {f.reviewer_verdict}</span>}
               </div>
               <div style={{ color: C.cream, marginBottom: 6 }}>{f.reason}</div>
-              <div style={{ color: C.mut, marginBottom: 4 }}><strong>Probe:</strong> {f.probe_prompt?.slice(0, 220)}</div>
-              <div style={{ color: C.mut, marginBottom: 8, whiteSpace: 'pre-wrap' }}><strong>Response:</strong> {f.bot_response?.slice(0, 400)}</div>
+              <div style={{ color: C.mut, marginBottom: 4 }}><strong>Probe:</strong> {f.probe_prompt}</div>
+              <div style={{ color: C.mut, marginBottom: 8, whiteSpace: 'pre-wrap' }}><strong>Response:</strong> {f.bot_response}</div>
               {f.reviewer_notes && <div style={{ color: C.amb, marginBottom: 8 }}>Notes: {f.reviewer_notes}</div>}
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button type="button" disabled={busy === f.probe_id} style={smBtn} onClick={() => review(f.probe_id, 'confirmed', 'PASS')}>Confirm PASS</button>
                 <button type="button" disabled={busy === f.probe_id} style={smBtn} onClick={() => review(f.probe_id, 'confirmed', 'FAIL')}>Confirm FAIL</button>
                 <button type="button" disabled={busy === f.probe_id} style={smBtn} onClick={() => review(f.probe_id, 'confirmed', 'PARTIAL')}>Confirm PARTIAL</button>
                 <button type="button" disabled={busy === f.probe_id} style={smBtn} onClick={() => review(f.probe_id, 'false_positive', 'PASS')}>False positive</button>
@@ -235,7 +436,9 @@ export default function SecurityAuditPanel() {
       )}
     </div>
   )
-}
+})
+
+export default SecurityAuditPanel
 
 function Stat({ label, value, sub, color }) {
   return (
@@ -245,6 +448,20 @@ function Stat({ label, value, sub, color }) {
       {sub && <div style={{ fontSize: 10, color: C.mut }}>{sub}</div>}
     </div>
   )
+}
+
+function modeToggle(active) {
+  return {
+    flex: 1,
+    padding: '10px 12px',
+    borderRadius: 8,
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 600,
+    border: `1px solid ${active ? C.cyan : C.bdr}`,
+    background: active ? 'rgba(6,182,212,.12)' : C.sur2,
+    color: active ? C.cyan : C.cream,
+  }
 }
 
 const lbl = { display: 'block', fontSize: 9, color: C.mut, textTransform: 'uppercase', letterSpacing: '.08em', marginTop: 10, marginBottom: 4 }

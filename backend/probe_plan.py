@@ -53,12 +53,20 @@ def build_probe_plan(
     industry_probe_cap: int = 5,
 ) -> list[dict[str, Any]]:
     """Critical-first sampling from core + optional industry pack."""
+    lib = load_library()
+    known_categories = {c["id"] for c in lib.get("categories", [])}
+    if category_ids and set(category_ids) - known_categories:
+        raise ValueError("Unknown probe category")
+    if industry_pack and not get_industry_pack(industry_pack):
+        raise ValueError("Unknown industry pack")
     if probe_ids:
         all_probes = _flatten_core() + (
             _flatten_industry(industry_pack) if industry_pack else []
         )
         by_id = {p["id"]: p for p in all_probes if p.get("id")}
-        return [by_id[pid] for pid in probe_ids if pid in by_id][:max_probes]
+        if set(probe_ids) - set(by_id):
+            raise ValueError("Unknown probe IDs for this selection")
+        return [by_id[pid] for pid in dict.fromkeys(probe_ids)][:max_probes]
 
     core = _flatten_core(category_ids)
     core.sort(key=lambda p: (SEVERITY_ORDER.get(p.get("severity", "Medium"), 9), p.get("id", "")))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
@@ -23,14 +23,14 @@ from audit_engine import (
     set_report_status,
     strip_evidence,
 )
-from audit_store import delete_audit, list_audits, load_audit
+from audit_store import delete_audit, list_audits, load_audit, update_retention
 from report_export import build_html_report
 from probe_registry import get_industry_pack, library_stats, load_library
 from waitlist_service import save_waitlist
 
 load_dotenv()
 
-FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
 scheduler = BackgroundScheduler()
 
 
@@ -96,14 +96,14 @@ class DailyAutomationRequest(BaseModel):
 
 
 class AuditTarget(BaseModel):
-    mode: str = "http_json"  # http_json | demobot
+    mode: Literal["http_json", "demobot"] = "http_json"  # http_json | demobot
     url: str = ""
     method: str = "POST"
     headers: dict[str, str] = Field(default_factory=dict)
     message_field: str = "message"
     response_field: str = "response"
     auth_bearer: str | None = None
-    timeout_seconds: float = 45
+    timeout_seconds: float = Field(default=45, ge=1, le=60)
 
 
 class AuditRunRequest(BaseModel):
@@ -112,11 +112,12 @@ class AuditRunRequest(BaseModel):
     industry_pack: str | None = None
     category_ids: list[str] | None = None
     probe_ids: list[str] | None = None
-    max_probes: int = 12
+    max_probes: int = Field(default=12, ge=1, le=50)
     authorization_confirmed: bool = False
     authorization_notes: str = ""
     testing_window: str = ""
     limitations: str = ""
+    retest_of: str | None = None
 
 
 class FindingReviewRequest(BaseModel):
@@ -128,6 +129,10 @@ class FindingReviewRequest(BaseModel):
 
 class ReportStatusRequest(BaseModel):
     report_status: str  # Draft | Reviewed | Final
+
+
+class RetentionRequest(BaseModel):
+    days: int = Field(ge=1, le=365)
 
 
 class TargetPingRequest(BaseModel):
@@ -168,7 +173,7 @@ app = FastAPI(title="BreakBot API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_ORIGIN, "http://localhost:5173", "https://breakbot.netlify.app"],
+    allow_origins=[FRONTEND_ORIGIN, "http://localhost:3000", "https://breakbot.netlify.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -287,6 +292,8 @@ def outreach_run(req: OutreachRunRequest, _: None = Depends(require_dashboard_ke
 @app.post("/api/waitlist")
 async def waitlist(req: WaitlistRequest):
     result = await save_waitlist(req.model_dump())
+    if not result.get("saved"):
+        raise HTTPException(status_code=503, detail="Could not save your request. Please try again later.")
     return {"success": True, **result}
 
 
@@ -325,6 +332,11 @@ def audit_run(req: AuditRunRequest, _: None = Depends(require_dashboard_key)):
             status_code=400,
             detail="You must confirm you have authorization to test this target.",
         )
+    from probe_plan import build_probe_plan
+    try:
+        build_probe_plan(industry_pack=req.industry_pack, category_ids=req.category_ids, probe_ids=req.probe_ids, max_probes=req.max_probes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     report = run_audit(
         target_config=req.target.model_dump(),
         customer_name=req.customer_name,
@@ -332,6 +344,7 @@ def audit_run(req: AuditRunRequest, _: None = Depends(require_dashboard_key)):
         category_ids=req.category_ids,
         probe_ids=req.probe_ids,
         max_probes=req.max_probes,
+        retest_of=req.retest_of,
         scope={
             "authorization_notes": req.authorization_notes,
             "testing_window": req.testing_window,
@@ -391,6 +404,14 @@ def audit_export(audit_id: str, _: None = Depends(require_dashboard_key), client
     return HTMLResponse(content=html_doc)
 
 
+@app.post("/api/audit/{audit_id}/retention")
+def audit_retention(audit_id: str, req: RetentionRequest, _: None = Depends(require_dashboard_key)):
+    try:
+        return update_retention(audit_id, req.days)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Audit not found") from None
+
+
 @app.post("/api/audit/{audit_id}/strip-evidence")
 def audit_strip(audit_id: str, _: None = Depends(require_dashboard_key)):
     try:
@@ -411,5 +432,5 @@ if __name__ == "__main__":
 
     port = int(os.getenv("PORT", "8001"))
     # Local client-audit edition: bind loopback only — never expose on LAN
-    host = os.getenv("HOST", "127.0.0.1")
+    host = "127.0.0.1"
     uvicorn.run("main:app", host=host, port=port, reload=True)

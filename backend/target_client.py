@@ -154,25 +154,14 @@ class TargetClient:
 
 
 def _extract_field(data: Any, field_path: str) -> str:
-    """Support dotted paths like choices.0.message.content or simple keys."""
-    if isinstance(data, str):
-        return data
-    if not field_path:
-        return str(data)
-
-    parts = field_path.split(".")
-    cur: Any = data
-    for part in parts:
-        if isinstance(cur, list) and part.isdigit():
-            cur = cur[int(part)]
-        elif isinstance(cur, dict):
-            cur = cur.get(part)
-        else:
-            break
-    if cur is None:
-        # fallback common shapes
-        for key in ("response", "reply", "text", "message", "output", "content"):
-            if isinstance(data, dict) and data.get(key):
-                return str(data[key])
-        return str(data)
-    return str(cur)
+    """Require a nonempty textual response at the configured dotted path."""
+    cur = data
+    if not isinstance(cur, str):
+        try:
+            for part in field_path.split("."):
+                cur = cur[int(part)] if isinstance(cur, list) else cur[part]
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise ValueError("Response field was not found; check the target configuration") from exc
+    if not isinstance(cur, str) or not cur.strip():
+        raise ValueError("Configured response field must contain nonempty text")
+    return cur

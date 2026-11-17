@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import * as backend from "../lib/api.js";
 import { loadProspects, normalizeLinkedIn } from "../data/prospects.js";
 import SecurityAuditPanel from "../components/SecurityAuditPanel.jsx";
+import DashboardIntro, { introAlreadySeen } from "../components/DashboardIntro.jsx";
 
 // ── THEME ─────────────────────────────────────────────────────────────────────
 const C = {
@@ -242,7 +243,10 @@ export default function MarketingOS() {
   const [companySearch, setCompanySearch] = useState("");
   const [searchOpen, setSearchOpen]     = useState(false);
   const [sendingEmail, setSendingEmail] = useState(null);
-  const [view, setView]           = useState("dashboard");
+  const [view, setView]           = useState("security");
+  const [salesOpen, setSalesOpen] = useState(false);
+  const [introOpen, setIntroOpen] = useState(() => !introAlreadySeen());
+  const [scrollHistory, setScrollHistory] = useState(false);
   const [prospects, setProspects] = useState(() => loadProspects(LS));
   const [activeAgent, setActiveAgent] = useState(null);
   const [agentChat, setAgentChat] = useState({});
@@ -254,6 +258,19 @@ export default function MarketingOS() {
   const [agentOutput, setAgentOutput] = useState({});
   const chatEnd = useRef(null);
   const searchRef = useRef(null);
+  const auditPanelRef = useRef(null);
+  const [auditStats, setAuditStats] = useState({ total: 0, draft: 0, final: 0 });
+
+  useEffect(() => {
+    backend.listAudits(50).then((r) => {
+      const audits = r.audits || [];
+      setAuditStats({
+        total: audits.length,
+        draft: audits.filter((a) => (a.report_status || "Draft") === "Draft").length,
+        final: audits.filter((a) => a.report_status === "Final").length,
+      });
+    }).catch(() => {});
+  }, [view]);
 
   // ── NOTIFICATION SYSTEM ────────────────────────────────────────────────────
   const [notifs, setNotifs]           = useState(() => LS.get("bb_notifs", []));
@@ -384,7 +401,7 @@ export default function MarketingOS() {
         prospectId: prospect.id,
         company: prospect.company,
       });
-      updateProspect(prospect.id, { stage: "sent" }, true);
+      if (res.sent) updateProspect(prospect.id, { stage: "sent" }, true);
       addHistory(prospect.id, res.sent ? `Email sent to ${prospect.email}` : `Email simulated (SMTP not configured)`);
       pushNotif("email_sent",
         res.sent ? `Email sent to ${prospect.company}` : `Draft ready for ${prospect.company}`,
@@ -582,6 +599,17 @@ export default function MarketingOS() {
   const totalA = prospects.filter(p => p.tier === "A").length;
   const totalB = prospects.filter(p => p.tier === "B").length;
 
+  const outreachStatus = (p) => {
+    const events = (p.history || []).filter(h => /email sent|email simulated|marked as sent|follow-up sent/i.test(h.action || ""));
+    const lastSent = [...events].sort((a, b) => new Date(b.ts || 0) - new Date(a.ts || 0))[0];
+    const sentAt = lastSent?.ts ? new Date(lastSent.ts) : null;
+    const daysSince = sentAt ? Math.floor((Date.now() - sentAt.getTime()) / 86400000) : null;
+    const hasReply = ["replied", "meeting", "audit", "customer"].includes(p.stage);
+    const followupNumber = events.length >= 2 ? 2 : 1;
+    const due = !hasReply && sentAt && daysSince >= 5 && events.length < 3;
+    return { count: events.length, lastSent, sentAt, daysSince, hasReply, followupNumber, due };
+  };
+
   // ── GENERATE DAILY BRIEF ───────────────────────────────────────────────────
   const [brief, setBrief] = useState(() => LS.get("bb_brief", null));
   const [briefLoading, setBriefLoading] = useState(false);
@@ -656,48 +684,67 @@ Recent activity: ${prospects.flatMap(p=>(p.history||[]).slice(-1).map(h=>`${p.co
           <div style={{ padding:"14px 16px", borderBottom:`1px solid ${C.bdr}`, display:"flex", alignItems:"center" }}>
             <div>
               <div style={{ fontFamily:"'IBM Plex Mono',monospace", fontWeight:700, fontSize:13, letterSpacing:".12em" }}>BREAK<span style={{color:C.red}}>BOT</span></div>
-              <div style={{ fontSize:9, color:C.mut, fontFamily:"'IBM Plex Mono',monospace" }}>MARKETING OS</div>
+              <div style={{ fontSize:9, color:C.mut, fontFamily:"'IBM Plex Mono',monospace" }}>OPERATOR CONSOLE</div>
             </div>
           </div>
 
-          {/* Nav */}
+          {/* Audits nav */}
           <div style={{ padding:"10px 10px 4px" }}>
-            <div style={{ fontSize:9, color:C.mut, fontFamily:"'IBM Plex Mono',monospace", textTransform:"uppercase", letterSpacing:".1em", padding:"0 4px 6px" }}>Command</div>
-            {[
-              { k:"brief",     icon:"☀️", label:"Daily Brief" },
-              { k:"dashboard", icon:"📊", label:"Dashboard" },
-              { k:"security",  icon:"🛡️", label:"Security Audit" },
-              { k:"pipeline",  icon:"🗂", label:"Pipeline" },
-              { k:"prospects", icon:"👥", label:"Prospects" },
-              { k:"agents",    icon:"🤖", label:"AI Agents" },
-            ].map(n => (
-              <button key={n.k} className={`nav-btn ${view===n.k?"active":""}`} onClick={()=>{setView(n.k);setSelected(null);setActiveAgent(null);}} style={{ display:"flex", alignItems:"center", gap:8, width:"100%", textAlign:"left", marginBottom:2 }}>
-                <span style={{fontSize:13}}>{n.icon}</span> {n.label}
-                {n.k==="brief"&&<span style={{marginLeft:"auto",fontSize:8,padding:"1px 5px",borderRadius:10,background:"rgba(45,186,110,.15)",color:C.grn,fontFamily:"'IBM Plex Mono',monospace"}}>8am</span>}
-              </button>
-            ))}
+            <div style={{ fontSize:9, color:C.mut, fontFamily:"'IBM Plex Mono',monospace", textTransform:"uppercase", letterSpacing:".1em", padding:"0 4px 6px" }}>Audits</div>
+            <button className={`nav-btn ${view==="security"&&!scrollHistory?"active":""}`} onClick={()=>{setView("security");setScrollHistory(false);setSelected(null);setActiveAgent(null);}} style={{ display:"flex", alignItems:"center", gap:8, width:"100%", textAlign:"left", marginBottom:2 }}>
+              <span style={{fontSize:13}}>🛡️</span> New Client Audit
+            </button>
+            <button className={`nav-btn ${view==="security"&&scrollHistory?"active":""}`} onClick={()=>{setView("security");setScrollHistory(true);setTimeout(()=>auditPanelRef.current?.scrollHistory?.(), 50);setSelected(null);setActiveAgent(null);}} style={{ display:"flex", alignItems:"center", gap:8, width:"100%", textAlign:"left", marginBottom:2 }}>
+              <span style={{fontSize:13}}>📋</span> Audit History
+            </button>
           </div>
 
-          {/* Agents list */}
+          {/* Sales — collapsed */}
           <div style={{ padding:"10px 10px 4px", borderTop:`1px solid ${C.bdr}` }}>
-            <div style={{ fontSize:9, color:C.mut, fontFamily:"'IBM Plex Mono',monospace", textTransform:"uppercase", letterSpacing:".1em", padding:"0 4px 6px" }}>Agents</div>
-            {AGENTS.map(a => (
-              <button key={a.id} className={`nav-btn ${activeAgent===a.id&&view==="agentchat"?"active":""}`}
-                onClick={()=>{setActiveAgent(a.id);setView("agentchat");}}
-                style={{ display:"flex", alignItems:"center", gap:8, width:"100%", textAlign:"left", marginBottom:2 }}>
-                <span style={{fontSize:13}}>{a.emoji}</span>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:10,fontWeight:600,color:C.cream,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div>
-                  <div style={{fontSize:8,color:C.mut}}>{a.role}</div>
-                </div>
-              </button>
-            ))}
+            <button type="button" onClick={()=>setSalesOpen(o=>!o)} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", width:"100%", background:"transparent", border:"none", color:C.mut, fontFamily:"'IBM Plex Mono',monospace", fontSize:9, textTransform:"uppercase", letterSpacing:".1em", padding:"0 4px 6px", cursor:"pointer" }}>
+              <span>Sales</span>
+              <span>{salesOpen ? "▾" : "▸"}</span>
+            </button>
+            {salesOpen && (
+              <>
+                {[
+                  { k:"brief",     icon:"☀️", label:"Daily Brief" },
+                  { k:"dashboard", icon:"📊", label:"Dashboard" },
+                  { k:"pipeline",  icon:"🗂", label:"Pipeline" },
+                  { k:"tracker",   icon:"📬", label:"Outreach Tracker" },
+                  { k:"prospects", icon:"👥", label:"Prospects" },
+                  { k:"agents",    icon:"🤖", label:"AI Agents" },
+                ].map(n => (
+                  <button key={n.k} className={`nav-btn ${view===n.k?"active":""}`} onClick={()=>{setView(n.k);setSelected(null);setActiveAgent(null);}} style={{ display:"flex", alignItems:"center", gap:8, width:"100%", textAlign:"left", marginBottom:2 }}>
+                    <span style={{fontSize:13}}>{n.icon}</span> {n.label}
+                    {n.k==="brief"&&<span style={{marginLeft:"auto",fontSize:8,padding:"1px 5px",borderRadius:10,background:"rgba(45,186,110,.15)",color:C.grn,fontFamily:"'IBM Plex Mono',monospace"}}>8am</span>}
+                  </button>
+                ))}
+                <div style={{ fontSize:9, color:C.mut, fontFamily:"'IBM Plex Mono',monospace", textTransform:"uppercase", letterSpacing:".1em", padding:"8px 4px 6px" }}>Agents</div>
+                {AGENTS.map(a => (
+                  <button key={a.id} className={`nav-btn ${activeAgent===a.id&&view==="agentchat"?"active":""}`}
+                    onClick={()=>{setActiveAgent(a.id);setView("agentchat");}}
+                    style={{ display:"flex", alignItems:"center", gap:8, width:"100%", textAlign:"left", marginBottom:2 }}>
+                    <span style={{fontSize:13}}>{a.emoji}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:10,fontWeight:600,color:C.cream,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div>
+                      <div style={{fontSize:8,color:C.mut}}>{a.role}</div>
+                    </div>
+                  </button>
+                ))}
+              </>
+            )}
           </div>
 
-          {/* Stats */}
+          {/* Stats — audit oriented */}
           <div style={{ marginTop:"auto", padding:12, borderTop:`1px solid ${C.bdr}` }}>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-              {[ {l:"Total",v:prospects.length,c:C.cream}, {l:"Tier A",v:totalA,c:C.grn}, {l:"Tier B",v:totalB,c:C.blu}, {l:"Won",v:prospects.filter(p=>p.stage==="customer").length,c:C.grn} ].map((s,i)=>(
+              {[
+                {l:"Audits",v:auditStats.total,c:C.cream},
+                {l:"Draft",v:auditStats.draft,c:C.amb},
+                {l:"Final",v:auditStats.final,c:C.grn},
+                {l:"Tier A",v:totalA,c:C.blu},
+              ].map((s,i)=>(
                 <div key={i} style={{background:C.sur2,borderRadius:6,padding:"8px 10px",textAlign:"center"}}>
                   <div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:18,fontWeight:700,color:s.c}}>{s.v}</div>
                   <div style={{fontSize:9,color:C.mut,textTransform:"uppercase",letterSpacing:".06em"}}>{s.l}</div>
@@ -713,11 +760,25 @@ Recent activity: ${prospects.flatMap(p=>(p.history||[]).slice(-1).map(h=>`${p.co
           <div style={{ height:50, background:C.sur, borderBottom:`1px solid ${C.bdr}`, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 20px", flexShrink:0 }}>
             <div>
               <div style={{ fontFamily:"'IBM Plex Mono',monospace", fontWeight:700, fontSize:13, color:C.cream }}>
-                { view==="brief"?"☀️ Daily Brief": view==="dashboard"?"Marketing Command Center": view==="security"?"Security Engine v1": view==="pipeline"?"Outreach Pipeline": view==="prospects"?"Prospect Database": view==="agents"?"AI Agent Roster": view==="agentchat"&&activeAgent ? `${AGENTS.find(a=>a.id===activeAgent)?.emoji} ${AGENTS.find(a=>a.id===activeAgent)?.name} — ${AGENTS.find(a=>a.id===activeAgent)?.role}` : view==="prospect-detail"?"Prospect Detail":"" }
+                { view==="brief"?"☀️ Daily Brief": view==="dashboard"?"Marketing Command Center": view==="security"?"New Client Audit": view==="pipeline"?"Outreach Pipeline": view==="tracker"?"Outreach Tracker": view==="prospects"?"Prospect Database": view==="agents"?"AI Agent Roster": view==="agentchat"&&activeAgent ? `${AGENTS.find(a=>a.id===activeAgent)?.emoji} ${AGENTS.find(a=>a.id===activeAgent)?.name} — ${AGENTS.find(a=>a.id===activeAgent)?.role}` : view==="prospect-detail"?"Prospect Detail":"" }
               </div>
-              <div style={{ fontSize:9, color:C.mut, fontFamily:"'IBM Plex Mono',monospace" }}>7 AI agents · Python backend · localStorage persistence</div>
+              <div style={{ fontSize:9, color:C.mut, fontFamily:"'IBM Plex Mono',monospace" }}>
+                {view==="security" ? "URL → probes → human review → Final report" : "7 AI agents · Python backend · localStorage persistence"}
+              </div>
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <button
+                type="button"
+                onClick={() => setIntroOpen(true)}
+                title="How audits work"
+                style={{
+                  background: C.sur2, border: `1px solid ${C.bdr}`, color: C.cyan,
+                  fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, padding: "6px 10px",
+                  borderRadius: 6, cursor: "pointer", letterSpacing: ".06em",
+                }}
+              >
+                ? How audits work
+              </button>
               {/* Company search with quick actions */}
               <div ref={searchRef} style={{ position:"relative" }}>
                 <input
@@ -956,7 +1017,7 @@ Recent activity: ${prospects.flatMap(p=>(p.history||[]).slice(-1).map(h=>`${p.co
 
             {/* ── DASHBOARD ── */}
             {view==="security"&&(
-              <SecurityAuditPanel />
+              <SecurityAuditPanel ref={auditPanelRef} scrollToHistory={scrollHistory} />
             )}
 
             {view==="dashboard"&&(
@@ -1022,6 +1083,45 @@ Recent activity: ${prospects.flatMap(p=>(p.history||[]).slice(-1).map(h=>`${p.co
                     ))}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* ── OUTREACH TRACKER ── */}
+            {view==="tracker"&&(
+              <div style={{animation:"fadeIn .3s ease"}}>
+                {(() => {
+                  const tracked = prospects.map(p => ({ p, meta: outreachStatus(p) }));
+                  const due = tracked.filter(x => x.meta.due).length;
+                  const waiting = tracked.filter(x => x.meta.count > 0 && !x.meta.hasReply && !x.meta.due).length;
+                  const replied = tracked.filter(x => x.meta.hasReply).length;
+                  return <>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+                      {[{label:"Emails sent",value:tracked.reduce((n,x)=>n+x.meta.count,0),color:C.grn},{label:"Follow-ups due",value:due,color:C.red},{label:"Awaiting reply",value:waiting,color:C.amb},{label:"Replied / converted",value:replied,color:C.pur}].map(s=><div key={s.label} style={card}><div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:22,fontWeight:700,color:s.color}}>{s.value}</div><div style={{fontSize:10,color:C.mut,marginTop:3,textTransform:"uppercase",letterSpacing:".08em"}}>{s.label}</div></div>)}
+                    </div>
+                    <div style={{...card,overflowX:"auto"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                        <div><div style={{fontSize:11,fontWeight:700,color:C.cream,fontFamily:"'IBM Plex Mono',monospace",textTransform:"uppercase",letterSpacing:".1em"}}>📬 Outreach follow-up tracker</div><div style={{fontSize:11,color:C.mut,marginTop:4}}>Use one clear next action per client. Follow up after 5 business days, then make the second touch the last one.</div></div>
+                        <button onClick={()=>setView("prospects")} style={btn(C.sur2,C.mut,false)}>Manage prospects</button>
+                      </div>
+                      <table style={{width:"100%",borderCollapse:"collapse",minWidth:780}}>
+                        <thead><tr style={{borderBottom:`1px solid ${C.bdr}`}}>{["Client","Touches","Last touch","Next action","Status","Action"].map(h=><th key={h} style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:9,color:C.mut,textTransform:"uppercase",letterSpacing:".08em",padding:"8px 10px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+                        <tbody>{tracked.map(({p,meta})=>{
+                          const next = meta.hasReply ? "Wait for next step" : meta.due ? `Send follow-up ${meta.followupNumber}` : meta.count ? `Wait ${Math.max(0,5-(meta.daysSince||0))} more day${Math.max(0,5-(meta.daysSince||0))===1?"":"s"}` : "Prepare first email";
+                          const status = meta.hasReply ? "Reply received" : meta.due ? "Follow-up due" : meta.count ? "Awaiting reply" : "Not contacted";
+                          return <tr key={p.id} className="prospect-row" style={{borderBottom:`1px solid ${C.bdr}`}}>
+                            <td style={{padding:"11px 10px",cursor:"pointer"}} onClick={()=>{setSelected(p);setView("prospect-detail");}}><div style={{fontWeight:600,color:C.cream,fontSize:12}}>{p.company}</div><div style={{fontSize:10,color:C.mut}}>{p.contact} · {p.email||"no email"}</div></td>
+                            <td style={{padding:"11px 10px",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,color:meta.count?C.grn:C.mut}}>{meta.count}/3</td>
+                            <td style={{padding:"11px 10px",fontSize:10,color:C.mut,whiteSpace:"nowrap"}}>{meta.sentAt?meta.sentAt.toLocaleDateString():"—"}</td>
+                            <td style={{padding:"11px 10px",fontSize:11,color:meta.due?C.red:C.cream}}>{next}</td>
+                            <td style={{padding:"11px 10px"}}><span style={{fontSize:10,padding:"3px 7px",borderRadius:12,color:meta.hasReply?C.pur:meta.due?C.red:meta.count?C.amb:C.mut,background:meta.hasReply?"rgba(168,85,247,.1)":meta.due?"rgba(232,52,26,.1)":meta.count?"rgba(224,154,32,.1)":"rgba(107,104,96,.1)"}}>{status}</span></td>
+                            <td style={{padding:"11px 10px",whiteSpace:"nowrap"}}><div style={{display:"flex",gap:5}} onClick={e=>e.stopPropagation()}>{meta.due&&<button onClick={()=>{setSelected(p);setView("prospect-detail");}} style={{...btn(C.red,"#000",false),fontSize:9,padding:"5px 8px"}}>Open follow-up</button>}{meta.count&&!meta.hasReply&&<button onClick={()=>{updateProspect(p.id,{stage:"replied"});addHistory(p.id,"Reply marked manually");}} style={{...btn(C.sur2,C.mut,false),fontSize:9,padding:"5px 8px"}}>Mark replied</button>}</div></td>
+                          </tr>;
+                        })}</tbody>
+                      </table>
+                      {prospects.length===0&&<div style={{fontSize:12,color:C.dim,textAlign:"center",padding:20}}>Add a prospect to start tracking outreach.</div>}
+                    </div>
+                  </>;
+                })()}
               </div>
             )}
 
@@ -1375,6 +1475,21 @@ Recent activity: ${prospects.flatMap(p=>(p.history||[]).slice(-1).map(h=>`${p.co
           </div>
         </div>
       )}
+
+      <DashboardIntro
+        open={introOpen}
+        onClose={() => setIntroOpen(false)}
+        onStartClient={() => {
+          setView("security");
+          setScrollHistory(false);
+          setTimeout(() => auditPanelRef.current?.focusUrl?.(), 100);
+        }}
+        onPracticeDemo={() => {
+          setView("security");
+          setScrollHistory(false);
+          setTimeout(() => auditPanelRef.current?.useDemobot?.(), 100);
+        }}
+      />
     </>
   );
 }

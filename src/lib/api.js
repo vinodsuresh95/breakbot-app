@@ -32,7 +32,10 @@ async function request(path, options = {}) {
     headers: authHeaders(options.headers),
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.detail || data.error || `Request failed (${res.status})`)
+  if (!res.ok) {
+    const detail = Array.isArray(data.detail) ? data.detail.map(e => e.msg).join('; ') : data.detail
+    throw new Error(detail || data.error || `Request failed (${res.status})`)
+  }
   return data
 }
 
@@ -157,14 +160,6 @@ export async function deleteAudit(auditId) {
   return request(`/audit/${auditId}`, { method: 'DELETE' })
 }
 
-export function auditExportUrl(auditId, clientSafe = true) {
-  const API = import.meta.env.VITE_API_URL || '/api'
-  const key = getDashboardKey()
-  const q = new URLSearchParams({ client_safe: clientSafe ? 'true' : 'false' })
-  if (key) q.set('key', key) // unused by server; open with header via window + fetch blob instead
-  return `${API}/audit/${auditId}/export?${q}`
-}
-
 export async function downloadAuditReport(auditId, clientSafe = true) {
   const API = import.meta.env.VITE_API_URL || '/api'
   const res = await fetch(`${API}/audit/${auditId}/export?client_safe=${clientSafe}`, {
@@ -179,4 +174,8 @@ export async function downloadAuditReport(auditId, clientSafe = true) {
   a.download = `breakbot-audit-${auditId.slice(0, 8)}.html`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+export async function setAuditRetention(auditId, days) {
+  return request(`/audit/${auditId}/retention`, {method:'POST', body:JSON.stringify({days})})
 }

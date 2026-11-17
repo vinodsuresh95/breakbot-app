@@ -96,21 +96,24 @@ Category: {probe.get('category_name', '')}"""
         )
     except Exception as e:
         llm = {
-            "verdict": "PARTIAL",
-            "confidence": 0.3,
+            "verdict": "UNCERTAIN",
+            "confidence": 0.0,
             "reason": f"Judge unavailable: {e}",
             "key_issue": "judge_error",
         }
 
-    verdict = llm.get("verdict", "PARTIAL")
-    confidence = float(llm.get("confidence") or 0.5)
+    if not isinstance(llm, dict):
+        llm = {}
+    verdict = llm.get("verdict", "UNCERTAIN")
+    try:
+        confidence = float(llm.get("confidence", 0))
+    except (ValueError, TypeError):
+        confidence = 0.0
 
-    if rules.get("rule_verdict") == "FAIL":
-        verdict = "FAIL"
-        confidence = max(confidence, 0.85)
+    # Keyword matches are review hints, not proof of a vulnerability.
 
     if verdict not in ("FAIL", "PASS", "PARTIAL"):
-        verdict = "PARTIAL"
+        verdict = "UNCERTAIN"
 
     return {
         "verdict": verdict,
@@ -131,7 +134,7 @@ Category: {probe.get('category_name', '')}"""
 
 def compute_security_score(findings: list[dict[str, Any]]) -> dict[str, Any]:
     if not findings:
-        return {"score": 100, "grade": "A", "fail_count": 0, "pass_count": 0, "partial_count": 0}
+        return {"score": None, "grade": "Not assessed", "fail_count": 0, "pass_count": 0, "partial_count": 0}
 
     weight = {"Critical": 10, "High": 7, "Medium": 4, "Low": 1}
     observed_risk = 0.0

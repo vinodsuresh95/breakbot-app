@@ -13,7 +13,7 @@ async def save_waitlist(data: dict) -> dict:
     base_id = os.getenv("AIRTABLE_BASE_ID")
 
     if not token or not base_id:
-        return {"saved": False, "airtable": False, "logged": True}
+        return {"saved": False, "airtable": False, "logged": False}
 
     payload = {
         "records": [

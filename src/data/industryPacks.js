@@ -1,3 +1,4 @@
+import { fetchProbeLibrary } from '../lib/api.js'
 /** Industry pack metadata — mirrors public/prompt_library.json industry_packs */
 
 export const INDUSTRY_PACKS = [
@@ -39,7 +40,6 @@ export const TOTAL_PROBES = TOTAL_LIBRARY
 
 /** Load industry pack via authenticated API (dashboard only). */
 export async function loadIndustryPack(packId) {
-  const { fetchProbeLibrary } = await import('../lib/api.js')
   const lib = await fetchProbeLibrary()
   const pack = lib.industry_packs?.find(p => p.id === packId)
   if (!pack) throw new Error(`Unknown industry pack: ${packId}`)
@@ -48,7 +48,6 @@ export async function loadIndustryPack(packId) {
 
 /** Core OWASP probes + one industry's probes — requires dashboard auth. */
 export async function loadAllProbesForIndustry(packId) {
-  const { fetchProbeLibrary } = await import('../lib/api.js')
   const lib = await fetchProbeLibrary()
   const core = lib.categories.flatMap(c =>
     c.prompts.map(p => ({ ...p, source: 'core', category: c.name }))

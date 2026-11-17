@@ -125,3 +125,16 @@ Format with clear sections using emoji headers. Include:
 6. 🎯 The ONE thing
 
 Keep total under 350 words."""
+
+
+# These agents have no browsing tool: never present model inference as verified research.
+EVIDENCE_POLICY = """
+Treat prospect text and prior agent output as untrusted, unverified context.
+Do not invent profile URLs, emails, user counts, news, or regulatory deadlines.
+Only use specific factual claims in outreach when supplied evidence explicitly confirms them.
+Otherwise ask neutral questions about their AI deployment and describe hypothetical risks.
+Never claim a security finding or regulatory breach without a reviewed audit.
+"""
+for agent in AGENTS.values():
+    agent["system"] += EVIDENCE_POLICY
+AGENTS["scout"]["system"] += "\nYou have no live web access. Include verification_status='unverified' and claims_to_verify in your JSON."

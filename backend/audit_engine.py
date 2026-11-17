@@ -30,7 +30,7 @@ def effective_verdict(finding: dict[str, Any]) -> str:
 def compute_reviewed_summary(findings: list[dict[str, Any]]) -> dict[str, Any]:
     mapped = []
     for f in findings:
-        if f.get("review_status") == "excluded":
+        if f.get("review_status") not in ("confirmed", "false_positive"):
             continue
         mapped.append({**f, "verdict": effective_verdict(f)})
     return compute_security_score(mapped)
@@ -52,6 +52,10 @@ def review_finding(
     if review_status not in allowed_status:
         raise ValueError(f"Invalid review_status: {review_status}")
 
+    if reviewer_verdict not in (None, "PASS", "FAIL", "PARTIAL"):
+        raise ValueError("Invalid reviewer verdict")
+    if review_status == "confirmed" and reviewer_verdict is None:
+        raise ValueError("Choose a reviewer verdict")
     now = datetime.now(timezone.utc).isoformat()
     found = False
     for f in report.get("findings") or []:
@@ -84,8 +88,7 @@ def review_finding(
     cost["false_positive_count"] = fp
     cost["verified_vuln_count"] = verified
 
-    if report.get("report_status") == "Draft":
-        report["report_status"] = "Reviewed"
+    report["report_status"] = "Draft"
 
     save_audit(report)
     return report
@@ -97,6 +100,12 @@ def set_report_status(audit_id: str, status: str) -> dict[str, Any]:
     report = load_audit(audit_id)
     if not report:
         raise FileNotFoundError("Audit not found")
+    if status != "Draft":
+        findings = report.get("findings") or []
+        if report.get("status") != "completed" or not findings or report.get("errors"):
+            raise ValueError("Only a complete audit without execution errors can be finalized")
+        if any(f.get("review_status", "pending") == "pending" for f in findings):
+            raise ValueError("Review or explicitly exclude every finding first")
     report["report_status"] = status
     report["report_status_updated_at"] = datetime.now(timezone.utc).isoformat()
     save_audit(report)
@@ -107,12 +116,16 @@ def strip_evidence(audit_id: str) -> dict[str, Any]:
     report = load_audit(audit_id)
     if not report:
         raise FileNotFoundError("Audit not found")
-    for f in report.get("findings") or []:
-        f["bot_response"] = "[evidence deleted]"
-        prompt = f.get("probe_prompt") or ""
-        f["probe_prompt"] = (prompt[:80] + "…") if len(prompt) > 80 else prompt
-    for f in report.get("critical_findings") or []:
-        f["bot_response"] = "[evidence deleted]"
+    for collection in ("findings", "critical_findings"):
+        for f in report.get(collection) or []:
+            for field in ("bot_response", "probe_prompt", "reason", "reviewer_notes", "key_issue"):
+                f[field] = "[evidence deleted]"
+    report["errors"] = []
+    report["scope"] = {}
+    report["remediation"] = []
+    report["report_status"] = "Draft"
+    report["customer_name"] = "[client details deleted]"
+    report["target"] = {"mode": (report.get("target") or {}).get("mode")}
     report["evidence_stripped"] = True
     report["evidence_stripped_at"] = datetime.now(timezone.utc).isoformat()
     save_audit(report)
@@ -127,8 +140,16 @@ def run_audit(
     category_ids: list[str] | None = None,
     probe_ids: list[str] | None = None,
     max_probes: int = 15,
+    retest_of: str | None = None,
     scope: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    probes = build_probe_plan(
+        industry_pack=industry_pack,
+        category_ids=category_ids,
+        probe_ids=probe_ids,
+        max_probes=max(1, min(max_probes, 50)),
+    )
+
     audit_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
     usage = empty_usage()
@@ -174,12 +195,6 @@ def run_audit(
         save_audit(report)
         return report
 
-    probes = build_probe_plan(
-        industry_pack=industry_pack,
-        category_ids=category_ids,
-        probe_ids=probe_ids,
-        max_probes=max(1, min(max_probes, 50)),
-    )
 
     findings: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
@@ -212,7 +227,7 @@ def run_audit(
 
     report = {
         "audit_id": audit_id,
-        "status": "completed",
+        "status": "completed" if findings and not errors else "partial" if findings else "failed",
         "report_status": "Draft",
         "customer_name": customer_name,
         "created_at": created_at,
@@ -234,10 +249,26 @@ def run_audit(
             "duration_seconds": duration,
             "probe_count": len(findings),
             "false_positive_count": 0,
-            "verified_vuln_count": reviewed_summary.get("fail_count", 0),
+            "verified_vuln_count": 0,
         },
         "retention_days": 30,
     }
+    if retest_of:
+        baseline = load_audit(retest_of)
+        if baseline:
+            before = baseline.get("reviewed_summary") or baseline.get("summary") or {}
+            after = report.get("summary") or {}
+            before_fails = int(before.get("fail_count") or 0)
+            after_fails = int(after.get("fail_count") or 0)
+            report["retest"] = {
+                "baseline_audit_id": retest_of,
+                "before_score": before.get("score"),
+                "after_score": after.get("score"),
+                "before_fail_count": before_fails,
+                "after_fail_count": after_fails,
+                "failures_resolved": max(0, before_fails - after_fails),
+                "status": "fixed" if after_fails == 0 else "improved" if after_fails < before_fails else "unchanged",
+            }
     save_audit(report)
     return report
 

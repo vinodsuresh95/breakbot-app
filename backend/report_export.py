@@ -6,7 +6,7 @@ import html
 from datetime import datetime, timezone
 from typing import Any
 
-from audit_engine import effective_verdict
+from audit_engine import effective_verdict, compute_reviewed_summary, _remediation_hints
 
 
 def build_html_report(report: dict[str, Any], *, client_safe: bool = True) -> str:
@@ -26,13 +26,15 @@ def build_html_report(report: dict[str, Any], *, client_safe: bool = True) -> st
     any_reviewed = any(f.get("review_status") not in (None, "pending") for f in findings)
     draft_warning = (report.get("report_status") or "Draft") == "Draft" or not any_reviewed
 
-    if client_safe and any_reviewed:
+    if client_safe:
         deliverable = [f for f in findings if f.get("review_status") == "confirmed"]
     else:
         deliverable = findings
 
     verified_fails = [f for f in deliverable if effective_verdict(f) == "FAIL"]
-    remediation = report.get("remediation") or []
+    if client_safe:
+        summary = compute_reviewed_summary(findings)
+    remediation = _remediation_hints(deliverable)
 
     rows = []
     for f in deliverable:
@@ -83,7 +85,7 @@ def build_html_report(report: dict[str, Any], *, client_safe: bool = True) -> st
     else:
         warning_banner = '<div class="info">FINAL — approved for client delivery.</div>'
 
-    auth_note = _esc(scope.get("authorization_notes") or "Written authorization on file (operator confirmation).")
+    auth_note = _esc(scope.get("authorization_notes") or "Not recorded.")
     window = _esc(scope.get("testing_window") or "As agreed with client")
     limitations = _esc(
         scope.get("limitations")
@@ -131,7 +133,7 @@ def build_html_report(report: dict[str, Any], *, client_safe: bool = True) -> st
     <div><strong>Date</strong><br/>{created}</div>
     <div><strong>Security score</strong><br/><span class="score">{summary.get('score', '—')}</span> / 100 · Grade {html.escape(str(summary.get('grade', '—')))}</div>
     <div><strong>Probes executed</strong><br/>{report.get('probes_executed', 0)}</div>
-    <div><strong>Verified failures</strong><br/>{len(verified_fails) if any_reviewed else summary.get('fail_count', 0)} (false positives marked: {fp_count})</div>
+    <div><strong>Verified failures</strong><br/>{len(verified_fails) if any_reviewed else 0} (false positives marked: {fp_count})</div>
   </div>
 
   <h2>1. Executive summary</h2>
@@ -153,13 +155,6 @@ def build_html_report(report: dict[str, Any], *, client_safe: bool = True) -> st
   <h2>4. Recommended remediation</h2>
   <ul>{rem_html or "<li class='mut'>No remediation items.</li>"}</ul>
 
-  <h2>5. Cost &amp; effort (internal)</h2>
-  <p class="mut">
-    Duration: {cost.get('duration_seconds', '—')}s ·
-    Claude calls: {cost.get('calls', '—')} ·
-    Tokens in/out: {cost.get('input_tokens', 0)} / {cost.get('output_tokens', 0)} ·
-    Est. API cost: ${cost.get('estimated_usd', 0)}
-  </p>
 
   <footer>
     Generated {html.escape(datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))} by BreakBot (local operator edition).
